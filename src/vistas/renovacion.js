@@ -14,7 +14,7 @@ import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
 import { drive, desdeBase64, descargar, blobABase64 } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -1359,10 +1359,15 @@ export function montarRenovacion() {
         consola(`${contexto.cursos.length} alias de curso, ${contexto.matriz.length} fila(s) de matriz`, "ok");
       }
 
+      // mientras se procesa a una persona ya se buscan los certificados de las
+      // siguientes: no pasan por Apps Script, asi que no le quitan turno a nada
+      const inventarioDe = adelantarInventarios(lista.map((o) => o.dni), senal);
+
       for (const [i, obj] of lista.entries()) {
         if (senal.aborted) break;
         barra.set(hechas, lista.length, `${obj.dni} · leyendo`);
         consola.cabecera(`[${i + 1}/${lista.length}] DNI ${obj.dni}`);
+        const inventario = inventarioDe(i);
 
         try {
           // el fotocheck antiguo adjuntado a mano (botones de la ficha) no viene
@@ -1392,12 +1397,13 @@ export function montarRenovacion() {
           };
 
           const r = soloConsulta
-            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer })
+            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer, inventario })
             : await renovarPersona(obj.dni, contexto, {
                 log: consola,
                 senal,
                 escribir: el.escribir.checked,
                 alLeer,
+                inventario,
               });
 
           if (r.estado === "nuevo") {

@@ -82,13 +82,19 @@ const nombreCertificado = (item) =>
  * Renueva a una persona y deja su fila escrita en la hoja.
  * Devuelve { estado: "ok" | "nuevo" | "error", ... }.
  */
-export async function renovarPersona(dni, ctx, { log = () => {}, senal, escribir = true, alLeer = null } = {}) {
+export async function renovarPersona(
+  dni,
+  ctx,
+  { log = () => {}, senal, escribir = true, alLeer = null, inventario: adelantado = null } = {}
+) {
   log(`buscando ${dni} en la base y sus certificados (JOMISER + EIN + Drive)...`);
   // el inventario solo necesita el DNI: se pide YA, en paralelo con la fila.
   // La fila va por la cola de Apps Script y el inventario no, asi que ninguno
   // espera al otro. Si la persona no esta en la base, el inventario se
   // descarta (y su rechazo se silencia para no quedar como error suelto).
-  const inventarioP = buscar({ dni }, senal);
+  // En un lote, quien llama puede haberlo pedido antes (`inventario`, una
+  // promesa) mientras se procesaba a la persona anterior.
+  const inventarioP = adelantado || buscar({ dni }, senal);
   inventarioP.catch(() => {});
 
   // lo que va a escribir lee SIEMPRE de la hoja: recalcular sobre una copia
@@ -230,6 +236,35 @@ export function resumenAutorizaciones(detalle = []) {
     sinCertificado: autorizados.filter((d) => d.estado === "NO APLICA"),
     capacitados: detalle.filter((d) => d.tipo === "C" && d.cap).length,
     conCertificadoNuevo: detalle.filter((d) => d.cambio === "NUEVO" || d.cambio === "ACTUALIZADO").length,
+  };
+}
+
+/**
+ * Adelanta el inventario de certificados de los siguientes de un lote.
+ *
+ * La busqueda (JOMISER + EIN + Drive) tarda varios segundos, solo necesita el
+ * DNI y no pasa por la fila de Apps Script: pedirla para la persona que viene
+ * mientras se lee, guarda y arma la carpeta de la actual saca esos segundos
+ * del camino critico. Se adelantan pocas (`cuantas`) para no cargar de golpe
+ * a JOMISER y EIN con todo el lote.
+ *
+ * Devuelve `tomar(i)`: la promesa del inventario del elemento `i` (la
+ * adelantada si existe, o `null` para que `renovarPersona` la pida) y, de
+ * paso, dispara la de los siguientes.
+ */
+export function adelantarInventarios(dnis, senal, cuantas = 2) {
+  const pedidos = new Map();
+  const pedir = (i) => {
+    if (i >= dnis.length || pedidos.has(i) || senal?.aborted) return;
+    const p = buscar({ dni: dnis[i] }, senal);
+    p.catch(() => {}); // si falla, lo reporta `renovarPersona` al usarla
+    pedidos.set(i, p);
+  };
+  return function tomar(i) {
+    const propia = pedidos.get(i) || null;
+    pedidos.delete(i);
+    for (let j = i + 1; j <= i + cuantas; j++) pedir(j);
+    return propia;
   };
 }
 
