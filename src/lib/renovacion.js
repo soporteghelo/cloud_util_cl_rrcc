@@ -85,7 +85,7 @@ const nombreCertificado = (item) =>
 export async function renovarPersona(
   dni,
   ctx,
-  { log = () => {}, senal, escribir = true, alLeer = null, inventario: adelantado = null } = {}
+  { log = () => {}, senal, escribir = true, alLeer = null, alCalcular = null, inventario: adelantado = null } = {}
 ) {
   log(`buscando ${dni} en la base y sus certificados (JOMISER + EIN + Drive)...`);
   // el inventario solo necesita el DNI: se pide YA, en paralelo con la fila.
@@ -109,9 +109,10 @@ export async function renovarPersona(
   const antes = leerFila(registro.valores);
   log(`${antes.nombreCompleto || dni} · fila ${registro.fila}`, "ok");
   // quien llama puede adelantar lo que depende de la fila (el fotocheck
-  // antiguo) mientras el inventario sigue en camino
+  // antiguo, o pintar ya las fechas de la hoja) mientras el inventario sigue
+  // en camino
   try {
-    alLeer?.(antes);
+    alLeer?.(antes, registro);
   } catch {
     /* un aviso que falla no frena la renovacion */
   }
@@ -130,17 +131,7 @@ export async function renovarPersona(
   log(`${cambiados.length} riesgo(s) con certificado nuevo`, cambiados.length ? "ok" : "info");
   for (const a of resultado.alertas) log(`  ${a.codigo ? a.codigo + ": " : ""}${a.motivo}`, a.nivel === "error" ? "err" : "warn");
 
-  if (escribir) {
-    await sheets(
-      { accion: "guardar", fila: registro.fila, valores: resultado.fila, noMapeados: resultado.noMapeados },
-      senal
-    );
-    // el resto de las pestanas repinta sola con esta fila: no hay que recargar
-    anotarPersona({ dni, fila: registro.fila, valores: resultado.fila });
-    log("fila actualizada en la hoja", "ok");
-  }
-
-  return {
+  const salida = {
     estado: "ok",
     dni,
     fila: registro.fila,
@@ -155,6 +146,27 @@ export async function renovarPersona(
     personales: resultado.personales,
     inventario,
   };
+
+  // El resultado ya esta calculado: quien llama puede pintarlo mientras la
+  // escritura hace fila en Apps Script (unos segundos que antes se esperaban
+  // con la pantalla vacia). Si el guardado falla, esta funcion lanza igual.
+  try {
+    alCalcular?.(salida);
+  } catch {
+    /* un aviso que falla no frena la renovacion */
+  }
+
+  if (escribir) {
+    await sheets(
+      { accion: "guardar", fila: registro.fila, valores: resultado.fila, noMapeados: resultado.noMapeados },
+      senal
+    );
+    // el resto de las pestanas repinta sola con esta fila: no hay que recargar
+    anotarPersona({ dni, fila: registro.fila, valores: resultado.fila });
+    log("fila actualizada en la hoja", "ok");
+  }
+
+  return salida;
 }
 
 /* ------------------------------------------------------------------ */
@@ -282,6 +294,35 @@ export async function consultarPersona(dni, ctx, opciones = {}) {
 /* ------------------------------------------------------------------ */
 /* Paso 5: la carpeta de salida en Drive                               */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Certificados ya bajados (o bajandose), por fuente + id + DNI. Abrir un PDF
+ * en el visor y armar la carpeta piden los mismos archivos: el segundo pedido
+ * sale de aca al instante, o espera al que ya esta en camino. Un fallo no
+ * queda guardado. Se guardan los ultimos `MAX_CERTS_EN_MEMORIA`.
+ *
+ * En EIN el id es la posicion de la fila en la grilla (0, 1, 2...): por eso
+ * el DNI entra en la clave.
+ */
+const certsEnMemoria = new Map();
+const MAX_CERTS_EN_MEMORIA = 80;
+
+export function descargarCertificado(cert, senal) {
+  const clave = [cert.origen, cert.id, cert.datosDescarga?.dni || ""].join("|");
+  const guardado = certsEnMemoria.get(clave);
+  if (guardado) return guardado;
+  // sin senal: un pedido compartido no se cancela porque uno de los dos se vaya
+  const p = descargar({ id: cert.id, origen: cert.origen, ...(cert.datosDescarga || {}) });
+  certsEnMemoria.set(clave, p);
+  p.catch(() => certsEnMemoria.delete(clave));
+  while (certsEnMemoria.size > MAX_CERTS_EN_MEMORIA) certsEnMemoria.delete(certsEnMemoria.keys().next().value);
+  if (!senal) return p;
+  return new Promise((listo, falla) => {
+    if (senal.aborted) return falla(new DOMException("abortado", "AbortError"));
+    senal.addEventListener("abort", () => falla(new DOMException("abortado", "AbortError")), { once: true });
+    p.then(listo, falla);
+  });
+}
 
 /** Descargas de certificados en simultaneo (no pasan por Apps Script). */
 const DESCARGAS_SIMULTANEAS = 6;
@@ -412,7 +453,18 @@ export async function generarSalidas(
   );
   const subir = colaDeSubida(carpetaP, senal);
 
-  const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [] };
+  const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [], archivos: [] };
+
+  /* Avance por unidades de trabajo: crear la carpeta, bajar y subir cada
+     certificado, y subir el fotocheck y el Word. `total` se fija mas abajo,
+     antes de que termine cualquiera de esas operaciones. */
+  let total = 0;
+  let hecho = 0;
+  const paso = (que) => avance(Math.min(++hecho, total), total, que);
+  carpetaP.then(
+    () => paso("carpeta lista"),
+    () => {}
+  );
 
   /* --- foto y fotocheck antiguo: los adelantados, o se piden ahora --- */
   const fotoP = Promise.resolve(
@@ -441,6 +493,7 @@ export async function generarSalidas(
       datos: pngBase64,
     }).then((r) => {
       log(`fotocheck subido (${png.ancho}x${png.alto} px)`, "ok");
+      paso("fotocheck subido");
       return r;
     });
     fotocheckSubido.catch(() => {});
@@ -461,6 +514,7 @@ export async function generarSalidas(
       datos: await blobABase64(docx),
     }).then((r) => {
       log(`Word de autorizacion subido`, "ok");
+      paso("Word subido");
       return r;
     });
 
@@ -497,9 +551,9 @@ export async function generarSalidas(
       personal: true,
     }));
   const tareas = [...vigentes, ...extra];
+  total = 1 + tareas.length * 2 + 2;
   log(`${vigentes.length} certificado(s) vigente(s) para subir${extra.length ? ` + ${extra.length} de Drive` : ""}`);
 
-  let listos = 0;
   const subidas = [];
   const fallo = (t, e) => {
     if (senal?.aborted) return;
@@ -512,26 +566,35 @@ export async function generarSalidas(
     async (t) => {
       const { cert } = t;
       try {
-        const r = await descargar({ id: cert.id, origen: cert.origen, ...(cert.datosDescarga || {}) }, senal);
+        const r = await descargarCertificado(cert, senal);
         if (r.sinCertificado) {
           if (!t.personal) log(`  · ${t.codigo}: sin certificado emitido`, "warn");
+          paso(`${t.codigo} · sin certificado`); // no hay nada que subir
           return;
         }
         const kb = (r.pdf.byteLength / 1024).toFixed(0);
+        // queda en memoria: el ZIP de la carpeta se arma con esto en el
+        // navegador, sin volver a bajar cada archivo de Drive
+        salida.archivos.push({ nombre: t.archivo, datos: r.pdf });
         // no se espera la subida: la descarga siguiente arranca ya
         subidas.push(
           subir({ nombre: t.archivo, mime: "application/pdf", datos: aBase64(r.pdf) }).then(
             (subido) => {
               salida.certificados.push(subido);
               log(`  · ${t.etiqueta}: ${kb} KB → ${subido.nombre}`, "ok");
+              paso(`${t.codigo} · subido`);
             },
-            (e) => fallo(t, e)
+            (e) => {
+              fallo(t, e);
+              paso(`${t.codigo} · no se pudo subir`);
+            }
           )
         );
       } catch (e) {
         fallo(t, e);
+        paso(`${t.codigo} · no se pudo bajar`); // tampoco se sube
       } finally {
-        avance(++listos, tareas.length, `${t.codigo} · ${cert.curso || t.archivo}`);
+        paso(`${t.codigo} · ${cert.curso || t.archivo}`);
       }
     },
     senal

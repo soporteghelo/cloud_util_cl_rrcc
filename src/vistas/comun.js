@@ -66,6 +66,27 @@ export function crearProgreso(prefijo) {
   };
 }
 
+/**
+ * Cuanto falta, estimado con el ritmo que se lleva: si `hecho` de `total`
+ * unidades tardaron lo que va desde `inicio`, lo que queda tarda en
+ * proporcion. Devuelve milisegundos, o `null` mientras no hay con que medir.
+ */
+export function estimarRestante(inicio, hecho, total, ahora = Date.now()) {
+  if (!total || hecho <= 0) return null;
+  if (hecho >= total) return 0;
+  return ((ahora - inicio) / hecho) * (total - hecho);
+}
+
+/** "~8 s", "~1 min 20 s"; `null` = todavia no se sabe. */
+export function textoRestante(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "calculando…";
+  const s = Math.max(1, Math.round(ms / 1000));
+  if (s < 60) return `~${s} s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `~${m} min ${r} s` : `~${m} min`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Aviso de fin                                                        */
 /* ------------------------------------------------------------------ */
