@@ -156,6 +156,48 @@ export async function einLogin(usuario, password) {
   return r2.cookie;
 }
 
+/**
+ * Sesion EIN cacheada ENTRE invocaciones de la funcion serverless.
+ *
+ * Vercel reutiliza el mismo proceso de Node para pedidos seguidos ("lambda
+ * caliente"): en una renovacion en lote, cada persona volvia a pagar el
+ * login completo (2 ida y vuelta HTTP) aunque la sesion anterior siguiera
+ * viva. Aca se guarda la cookie con su hora y se reutiliza mientras no haya
+ * pasado `SESION_VIDA`; si el servidor ya la invalido (o el proceso es uno
+ * nuevo), `einBuscar` lo nota (el grid deja de traer "DropInteresados") y
+ * se reintenta UNA vez con login fresco.
+ */
+const SESION_VIDA = 8 * 60 * 1000;
+let sesion = null; // { cookie, usuario, ts }
+
+function sesionFresca(usuario) {
+  return sesion && sesion.usuario === usuario && Date.now() - sesion.ts < SESION_VIDA ? sesion : null;
+}
+
+async function iniciarSesion(usuario, password) {
+  const cookie = await einLogin(usuario, password);
+  sesion = { cookie, usuario, ts: Date.now() };
+  return sesion;
+}
+
+/**
+ * Busca los cursos de `dni` en EIN, logueandose solo si hace falta.
+ * Devuelve lo mismo que `einBuscar` (mas `cookie`/`empresa` ya frescos para
+ * que quien llame se los pase a la descarga).
+ */
+export async function einBuscarConSesion(dni, usuario, password) {
+  const previa = sesionFresca(usuario);
+  try {
+    const activa = previa || (await iniciarSesion(usuario, password));
+    return await einBuscar(dni, activa.cookie);
+  } catch (e) {
+    if (!previa) throw e; // ya era login fresco: no hay nada mas que probar
+    sesion = null;
+    const nueva = await iniciarSesion(usuario, password);
+    return einBuscar(dni, nueva.cookie);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Busqueda                                                            */
 /* ------------------------------------------------------------------ */

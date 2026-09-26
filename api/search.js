@@ -8,7 +8,7 @@
 
 import { jomiserBuscar, normalizarDni } from "./_lib/nexa.js";
 import { induccionBuscar, driveBuscarRespaldo, sinRespaldoInnecesario } from "./_lib/drive.js";
-import { einLogin, einBuscar } from "./_lib/ein.js";
+import { einBuscarConSesion } from "./_lib/ein.js";
 
 /**
  * EIN es opcional: sin EIN_USUARIO/EIN_PASSWORD la fuente queda desactivada
@@ -25,8 +25,10 @@ async function buscarEin(dni) {
   const password = process.env.EIN_PASSWORD;
   if (!usuario || !password) return { items: [], avisos: [] };
 
-  const cookie = await einLogin(usuario, password);
-  const r = await einBuscar(dni, cookie);
+  // el login se reutiliza entre pedidos (lambda caliente) via
+  // `einBuscarConSesion`: solo se vuelve a loguear si expiro o si esta es la
+  // primera busqueda del proceso
+  const r = await einBuscarConSesion(dni, usuario, password);
 
   const avisos = [];
   if (r.descartadas) {

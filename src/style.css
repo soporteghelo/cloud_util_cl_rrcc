@@ -1268,7 +1268,7 @@ button.cert-fecha:hover, button.cert-fecha:focus-visible { background: rgba(0, 2
   position: sticky;
   top: 0;
   z-index: 8;
-  grid-template-areas: "id ctl" "edit edit";
+  grid-template-areas: "id ctl" "pend pend" "edit edit" "prog prog";
   padding: 9px 11px;
   background: #05090f;
   border-bottom: 1px solid var(--line-soft);
@@ -1278,12 +1278,14 @@ button.cert-fecha:hover, button.cert-fecha:focus-visible { background: rgba(0, 2
 .card-barra .card-n { margin-left: 0; }
 .card-barra .aplicar-c { grid-area: ctl; justify-self: end; margin-left: 0; }
 .card-barra .edicion-barra { grid-area: edit; }
+.card-barra .pendientes { grid-area: pend; }
+.card-barra .card-progresos { grid-area: prog; }
 .card-head-ren .card-nom { grid-area: nom; }
 .card-head-ren .card-res { grid-area: res; }
 .card-c-lista { grid-area: lista; align-self: stretch; padding: 5px 9px; font-size: 9.5px; line-height: 1.6; letter-spacing: 0.04em; color: var(--tx-dim); border-left: 3px solid var(--cy); border-radius: 2px; background: rgba(34, 211, 238, 0.06); }
 .card-c-lista span { white-space: nowrap; }
 @media (max-width: 900px) {
-  .card-barra { position: static; grid-template-columns: minmax(0, 1fr); grid-template-areas: "id" "ctl" "edit"; }
+  .card-barra { position: static; grid-template-columns: minmax(0, 1fr); grid-template-areas: "id" "ctl" "pend" "edit" "prog"; }
   .card-head-ren { grid-template-columns: minmax(0, 1fr); grid-template-areas: "nom" "res" "lista"; }
   .card-barra .aplicar-c { justify-self: start; }
 }
@@ -1961,3 +1963,167 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   .et-vencido    .et-badge { color: #a3122a; }
   .et-noaplica   .et-badge { color: #666; }
 }
+
+/* ==========================================================================
+   RENOVACION — lo que hay que corregir se ve de un vistazo
+   ========================================================================== */
+
+.rc { position: relative; }
+.rrcc-fecha { position: relative; }
+
+/* insignia de estado en la esquina: VENCIDO parpadea, POR VENCER no */
+.rc-vencido::after,
+.rc-actualizar::after {
+  position: absolute;
+  top: -7px;
+  right: 6px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  z-index: 1;
+}
+.rc-vencido::after {
+  content: "VENCIDO";
+  color: #fff;
+  background: var(--rd);
+  box-shadow: 0 0 10px rgba(255, 77, 109, 0.8);
+  animation: rc-insignia 1s steps(1, end) infinite;
+}
+.rc-actualizar::after { content: "POR VENCER"; color: #04070c; background: var(--am); }
+.rrcc-grupo-sin .rc-vencido::after,
+.rrcc-grupo-sin .rc-actualizar::after { content: none; }
+@keyframes rc-insignia { 50% { opacity: 0.35; } }
+
+/* la fecha de la hoja no coincide con la del certificado: el bloque de la
+   fecha se enciende en ambar y dice por que, para saber DONDE editar */
+.rc-fecha-diferente .rrcc-fecha {
+  border-color: var(--am);
+  background: rgba(251, 191, 36, 0.16);
+  animation: rc-fecha-latido 1.2s ease-in-out infinite;
+}
+.rc-fecha-diferente .rrcc-fecha small { color: var(--am); }
+.rc-fecha-diferente .rrcc-fecha input {
+  color: #ffe6a8;
+  border-color: var(--am);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.5);
+}
+/* el rotulo "RRCC EN HOJA" pasa a decir por que esta encendida */
+.rc-fecha-diferente .rrcc-fecha small { font-size: 0; }
+.rc-fecha-diferente .rrcc-fecha small::after {
+  content: "HOJA ≠ CERTIFICADO";
+  font-size: 7.5px;
+  color: #04070c;
+  background: var(--am);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+@keyframes rc-fecha-latido {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  50% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.45), 0 0 16px rgba(251, 191, 36, 0.5); }
+}
+
+/* atajo: copiar la vigencia del certificado a la hoja */
+.rc-usar-cert {
+  width: 100%;
+  padding: 3px 5px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #04070c;
+  background: var(--am);
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.rc-usar-cert:hover, .rc-usar-cert:focus-visible { background: #ffd666; outline: 1px solid #fff; outline-offset: -1px; }
+.rc-usar-cert[hidden] { display: none; }
+
+/* al saltar desde un contador, la tarjeta destella; al corregirla, verde */
+.rc-senalado { animation: rc-senalado 0.5s ease-in-out 3 !important; }
+@keyframes rc-senalado {
+  50% { transform: scale(1.06); box-shadow: 0 0 0 3px var(--cy), 0 0 26px rgba(34, 211, 238, 0.7); z-index: 2; }
+}
+.rc-corregido { animation: rc-corregido 0.9s ease-out 1 !important; }
+@keyframes rc-corregido {
+  0% { box-shadow: 0 0 0 3px var(--gr), 0 0 24px rgba(0, 255, 156, 0.8); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 255, 156, 0); }
+}
+
+/* contadores de lo pendiente, en la cabecera de la ficha */
+.pendientes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pend-chip {
+  padding: 3px 9px;
+  border: 1px solid;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: transparent;
+}
+button.pend-chip { cursor: pointer; }
+.pend-dif { color: #04070c; background: var(--am); border-color: var(--am); animation: rc-fecha-latido 1.2s ease-in-out infinite; }
+.pend-venc { color: #fff; background: var(--rd); border-color: var(--rd); animation: rc-fecha-latido-rojo 1.2s ease-in-out infinite; }
+.pend-act { color: var(--am); border-color: var(--am); }
+.pend-ok { color: var(--gr); border-color: rgba(0, 255, 156, 0.5); }
+.pend-cargando { color: var(--tx-dim); border-color: var(--line); }
+@keyframes rc-fecha-latido-rojo {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 109, 0); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 77, 109, 0.45), 0 0 16px rgba(255, 77, 109, 0.6); }
+}
+
+/* foto de la persona en la cabecera */
+.card-foto {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  background: #05090f;
+}
+.card-foto img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.card-foto-vacia { border-style: dashed; }
+.card-foto-cargando,
+.rc-cert.cargando,
+.cert-buscando {
+  background: linear-gradient(90deg, #05090f 0%, rgba(34, 211, 238, 0.18) 50%, #05090f 100%) 0 0 / 200% 100%;
+  animation: brillo-carga 1.1s linear infinite;
+}
+.rc-cert.cargando { padding: 5px; border-radius: 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--cy); }
+@keyframes brillo-carga { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ficha preliminar (solo la hoja): se mira, todavia no se edita */
+.ficha-cargando .rrcc-principal input,
+.ficha-cargando .rrcc-principal select { opacity: 0.55; cursor: progress; }
+
+/* avance de la carpeta en Drive y de la descarga ZIP, con tiempo restante */
+.card-progresos { display: grid; gap: 7px; }
+.card-progresos:empty, .pendientes:empty { display: none; }
+.tarea-prog {
+  padding: 7px 9px;
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  border-radius: 3px;
+  background: rgba(34, 211, 238, 0.06);
+}
+.tarea-prog-top { display: flex; align-items: baseline; gap: 10px; font-size: 10.5px; }
+.tarea-prog-top b { color: var(--cy); letter-spacing: 0.08em; }
+.tarea-prog-pct { color: var(--tx); font-weight: 700; }
+.tarea-prog-eta { margin-left: auto; color: var(--am); font-weight: 800; }
+.tarea-prog-barra { height: 8px; margin: 5px 0 4px; border-radius: 99px; overflow: hidden; background: #05090f; border: 1px solid var(--line); }
+.tarea-prog-barra i {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(-45deg, var(--cy) 0 8px, #0ea5c6 8px 16px) 0 0 / 22.6px 22.6px;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  transition: width 0.35s ease;
+  animation: rayas-avance 0.6s linear infinite;
+}
+.tarea-prog-espera .tarea-prog-barra i { width: 30% !important; animation: rayas-avance 0.6s linear infinite, barra-vaiven 1.4s ease-in-out infinite alternate; }
+.tarea-prog small { display: block; font-size: 9.5px; color: var(--tx-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes rayas-avance { to { background-position: 22.6px 0; } }
+@keyframes barra-vaiven { from { transform: translateX(0); } to { transform: translateX(233%); } }

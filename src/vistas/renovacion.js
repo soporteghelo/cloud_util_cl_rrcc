@@ -9,12 +9,12 @@
  */
 
 import JSZip from "jszip";
-import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTexto } from "./comun.js";
+import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTexto, estimarRestante, textoRestante } from "./comun.js";
 import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
-import { drive, desdeBase64, descargar, blobABase64 } from "../lib/api.js";
+import { drive, desdeBase64, blobABase64 } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -517,17 +517,70 @@ export function montarRenovacion() {
     if (cambiaDeGrupo) celda.scrollIntoView({ block: "nearest" });
   }
 
-  /** Anota (o retira) una edicion y refresca solo esa celda: repintar la
-      ficha entera le quitaria el foco al campo de fecha mientras se escribe. */
-  function diferenciaFechaEditableConCertificado(ficha, codigo, venc = undefined) {
-    const riesgo = filaDeHoja(ficha).riesgos.find((x) => x.codigo === codigo);
+  /**
+   * La vigencia que da el certificado elegido para un riesgo y si la fecha
+   * editable (la de la hoja, o lo tecleado encima) no coincide con ella. Una
+   * tarjeta A o C sin fecha en la hoja pero con certificado tambien cuenta:
+   * es justo una de las que hay que completar.
+   */
+  function discrepancia(ficha, codigo, venc, tipo) {
     const cert = (ficha?.detalle || []).find((d) => d.codigo === codigo)?.certificado;
-    if (!riesgo || !cert || !cert.fecha) return false;
-    const valorEditable = venc !== undefined ? venc : visibleDe(ficha, riesgo).venc;
-    const vencCert = vencimientoDe(codigo, cert.fecha, cert, umbrales().vencido) || "";
-    return Boolean(valorEditable && vencCert) && String(valorEditable).trim() !== String(vencCert).trim();
+    const venceCert = cert?.fecha ? vencimientoDe(codigo, cert.fecha, cert, umbrales().vencido) || "" : "";
+    const conTipo = tipo === "A" || tipo === "C";
+    const diferente = Boolean(venceCert) && (venc ? String(venc).trim() !== String(venceCert).trim() : conTipo);
+    return { diferente, venceCert };
   }
 
+  /**
+   * Lo que hay que mirar en la ficha, contado: fechas que no coinciden con su
+   * certificado, vencidos y por vencer (solo A y C: sin tipo no se imprime).
+   * Cada contador lleva a la primera tarjeta de su clase.
+   */
+  function pintarPendientes(card, ficha) {
+    const caja = card.querySelector("[data-pendientes]");
+    if (!caja) return;
+    if (ficha.cargando) {
+      caja.innerHTML = `<span class="pend-chip pend-cargando">buscando certificados…</span>`;
+      return;
+    }
+    const cuenta = { dif: 0, venc: 0, act: 0 };
+    for (const celda of card.querySelectorAll(".rc")) {
+      const tipo = celda.querySelector("[data-tipo]")?.value || "";
+      if (celda.classList.contains("rc-fecha-diferente")) cuenta.dif++;
+      if (tipo !== "A" && tipo !== "C") continue;
+      if (celda.classList.contains("rc-vencido")) cuenta.venc++;
+      else if (celda.classList.contains("rc-actualizar")) cuenta.act++;
+    }
+    const chips = [];
+    if (cuenta.dif) chips.push(`<button type="button" class="pend-chip pend-dif" data-ir=".rc-fecha-diferente" title="Ir a la primera tarjeta cuya fecha no coincide con su certificado">${cuenta.dif} fecha(s) ≠ certificado</button>`);
+    if (cuenta.venc) chips.push(`<button type="button" class="pend-chip pend-venc" data-ir=".rc-vencido" title="Ir al primer riesgo vencido">${cuenta.venc} vencido(s)</button>`);
+    if (cuenta.act) chips.push(`<button type="button" class="pend-chip pend-act" data-ir=".rc-actualizar" title="Ir al primer riesgo por vencer">${cuenta.act} por vencer</button>`);
+    caja.innerHTML = chips.length ? chips.join("") : `<span class="pend-chip pend-ok">✓ fechas al día con los certificados</span>`;
+    for (const chip of caja.querySelectorAll("[data-ir]")) {
+      chip.addEventListener("click", () => {
+        const destino = card.querySelector(chip.dataset.ir);
+        if (!destino) return;
+        destino.scrollIntoView({ behavior: "smooth", block: "center" });
+        destino.classList.remove("rc-senalado");
+        void destino.offsetWidth; // reinicia la animacion si ya estaba senalada
+        destino.classList.add("rc-senalado");
+        destino.querySelector("input[data-venc]")?.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  /** Marca (o desmarca) la tarjeta cuya fecha no coincide con su certificado
+      y muestra el atajo para copiar la del certificado. */
+  function pintarDiscrepancia(card, celda, ficha, codigo, { venc, tipo }) {
+    const { diferente } = discrepancia(ficha, codigo, venc, tipo);
+    celda.classList.toggle("rc-fecha-diferente", diferente);
+    const atajo = celda.querySelector("[data-usar-cert]");
+    if (atajo) atajo.hidden = !diferente;
+    pintarPendientes(card, ficha);
+  }
+
+  /** Anota (o retira) una edicion y refresca solo esa celda: repintar la
+      ficha entera le quitaria el foco al campo de fecha mientras se escribe. */
   function editar(dni, card, codigo, cambio) {
     const ficha = fichas.get(dni);
     ficha.salidaDesactualizada = true;
@@ -541,13 +594,14 @@ export function montarRenovacion() {
     else delete ficha.ediciones[codigo];
 
     const celda = card.querySelector(`.rc[data-codigo="${codigo}"]`);
-    const { tipo, estado } = visibleCon(ficha, codigo, actual);
+    const visible = visibleCon(ficha, codigo, actual);
+    const { tipo, estado } = visible;
     for (const clase of Object.values(CLASE_ESTADO)) celda.classList.remove(clase);
     celda.classList.add(CLASE_ESTADO[estado] || "rc-noaplica");
     celda.classList.toggle("rc-editado", Object.keys(actual).length > 0);
-    celda.classList.toggle("rc-fecha-diferente", diferenciaFechaEditableConCertificado(ficha, codigo, actual.venc ?? visibleCon(ficha, codigo, actual).venc));
     celda.querySelector("[data-estado]").textContent = estado.toLowerCase();
     celda.querySelector("[data-tipo]").className = claseTipo(tipo);
+    pintarDiscrepancia(card, celda, ficha, codigo, visible);
     moverAGrupo(card, celda, tipo);
     actualizarSeleccion(card, ficha);
     pintarBarraEdicion(card, ficha);
@@ -604,6 +658,113 @@ export function montarRenovacion() {
     temporizadoresSalida.set(dni, t);
   }
 
+  /* ---------------- progreso con tiempo restante ---------------- */
+
+  const TITULO_PROGRESO = { salida: "CARPETA EN DRIVE", zip: "DESCARGA ZIP" };
+
+  /**
+   * Barra de avance de una tarea larga de la ficha (`salida` = armar la
+   * carpeta en Drive, `zip` = descargarla), con cuanto falta. Vive en
+   * `ficha.progreso` para sobrevivir a los repintados de la ficha.
+   * `estado` = { hecho, total, texto } o `null` para quitarla.
+   */
+  function mostrarProgreso(dni, clave, estado) {
+    const ficha = fichas.get(dni);
+    if (!ficha) return;
+    const progreso = (ficha.progreso ||= {});
+    if (!estado) delete progreso[clave];
+    else {
+      const previo = progreso[clave];
+      const inicio = previo?.inicio || Date.now();
+      progreso[clave] = {
+        ...estado,
+        inicio,
+        restante: estimarRestante(inicio, estado.hecho, estado.total),
+        medido: Date.now(),
+      };
+    }
+    pintarProgresos(el.resultados.querySelector(`[data-dni="${dni}"]`), ficha);
+    vigilarProgresos();
+  }
+
+  function htmlProgresos(ficha) {
+    return Object.entries(ficha.progreso || {})
+      .map(([clave, p]) => {
+        const pct = p.total ? Math.min(100, Math.round((p.hecho / p.total) * 100)) : 0;
+        return (
+          `<div class="tarea-prog${p.hecho ? "" : " tarea-prog-espera"}" data-prog="${clave}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">` +
+          `<div class="tarea-prog-top"><b>${TITULO_PROGRESO[clave] || clave}</b>` +
+          `<span class="tarea-prog-pct">${pct}%</span>` +
+          `<span class="tarea-prog-eta" data-eta>${etaDe(p)}</span></div>` +
+          `<div class="tarea-prog-barra"><i style="width:${Math.max(pct, 3)}%"></i></div>` +
+          `<small>${escaparHtml(p.texto || "")}</small></div>`
+        );
+      })
+      .join("");
+  }
+
+  /** Lo que falta, descontando lo que paso desde la ultima medicion: asi el
+      reloj sigue bajando aunque la siguiente unidad tarde en terminar. */
+  function etaDe(p) {
+    if (p.restante === null || p.restante === undefined) return "calculando…";
+    const ms = Math.max(0, p.restante - (Date.now() - p.medido));
+    return ms < 1000 ? "terminando…" : `quedan ${textoRestante(ms)}`;
+  }
+
+  function pintarProgresos(card, ficha) {
+    const caja = card?.querySelector("[data-progresos]");
+    if (caja) caja.innerHTML = htmlProgresos(ficha);
+  }
+
+  /** Un solo reloj para todas las barras abiertas: se apaga solo cuando no queda ninguna. */
+  let relojProgreso = null;
+  function vigilarProgresos() {
+    if (relojProgreso) return;
+    relojProgreso = setInterval(() => {
+      let activas = 0;
+      for (const [dni, ficha] of fichas) {
+        for (const [clave, p] of Object.entries(ficha.progreso || {})) {
+          activas++;
+          const eta = el.resultados.querySelector(`[data-dni="${dni}"] [data-prog="${clave}"] [data-eta]`);
+          if (eta) eta.textContent = etaDe(p);
+        }
+      }
+      if (!activas) {
+        clearInterval(relojProgreso);
+        relojProgreso = null;
+      }
+    }, 1000);
+  }
+
+  /**
+   * El fotocheck (PNG) y el Word tal como se ven AHORA en la ficha, con
+   * ediciones incluidas. Se arman en el navegador: lo usan la resubida a
+   * Drive y el ZIP, que asi no tiene que bajarlos de Drive.
+   */
+  async function documentosActuales(ficha) {
+    const persona = personaVisible(ficha);
+    const foto = ficha.foto || (await fotoDeDni(persona.dni).catch(() => null));
+    const png = await dibujarFotocheck(persona, { foto, escala: 3 });
+    const pngBlob = await new Promise((resolver) => png.toBlob(resolver, "image/png"));
+    const docx = await armarAutorizacion({
+      fotocheck: { datos: await pngBlob.arrayBuffer(), mime: "image/png" },
+      antiguo: ficha.antiguoManual || ficha.antiguo || null,
+      medidas: {
+        fotocheckAnchoCm: Number(contexto?.config?.FOTOCHECK_ANCHO_CM || 10),
+        fotocheckAltoCm: Number(contexto?.config?.FOTOCHECK_ALTO_CM || 8),
+        antiguoAnchoCm: Number(contexto?.config?.ANTIGUO_ANCHO_CM || 17),
+      },
+    });
+    const nombreBase = persona.nombreCompleto || persona.dni;
+    return {
+      persona,
+      pngBlob,
+      docx,
+      nombreFotocheck: `FOTOCHECK_${nombreBase}.png`,
+      nombreWord: `Autorizacion_RRCC_${nombreBase}.docx`,
+    };
+  }
+
   /**
    * Antes de abrir la carpeta, compartirla o descargarla en ZIP, la carpeta
    * de Drive tiene que mostrar lo mismo que la ficha en pantalla: si se
@@ -640,37 +801,20 @@ export function montarRenovacion() {
 
     const tarea = (async () => {
       try {
-        const persona = personaVisible(ficha);
-        const foto = ficha.foto || (await fotoDeDni(persona.dni).catch(() => null));
-        const png = await dibujarFotocheck(persona, { foto, escala: 3 });
-        const pngBlob = await new Promise((resolver) => png.toBlob(resolver, "image/png"));
-        const pngBase64 = await blobABase64(pngBlob);
-        const nombreBase = persona.nombreCompleto || persona.dni;
-
+        const docs = await documentosActuales(ficha);
         const fotocheckSubido = await drive({
           accion: "subir",
           carpetaId: folderId,
-          nombre: `FOTOCHECK_${nombreBase}.png`,
+          nombre: docs.nombreFotocheck,
           mime: "image/png",
-          datos: pngBase64,
-        });
-
-        const antiguo = ficha.antiguoManual || ficha.antiguo || null;
-        const docx = await armarAutorizacion({
-          fotocheck: { datos: await pngBlob.arrayBuffer(), mime: "image/png" },
-          antiguo,
-          medidas: {
-            fotocheckAnchoCm: Number(contexto?.config?.FOTOCHECK_ANCHO_CM || 10),
-            fotocheckAltoCm: Number(contexto?.config?.FOTOCHECK_ALTO_CM || 8),
-            antiguoAnchoCm: Number(contexto?.config?.ANTIGUO_ANCHO_CM || 17),
-          },
+          datos: await blobABase64(docs.pngBlob),
         });
         const wordSubido = await drive({
           accion: "subir",
           carpetaId: folderId,
-          nombre: `Autorizacion_RRCC_${nombreBase}.docx`,
+          nombre: docs.nombreWord,
           mime: MIME_DOCX,
-          datos: await blobABase64(docx),
+          datos: await blobABase64(docs.docx),
         });
 
         ficha.salida = { ...(ficha.salida || {}), carpetaId: folderId, fotocheck: fotocheckSubido, word: wordSubido };
@@ -687,32 +831,78 @@ export function montarRenovacion() {
     return tarea;
   }
 
+  /**
+   * ZIP de la carpeta de la persona.
+   *
+   * Camino rapido: los certificados ya se bajaron al armar la carpeta y siguen
+   * en memoria (`salida.archivos`), y el fotocheck y el Word se arman aca con
+   * lo que muestra la ficha. No se toca Drive: sale en uno o dos segundos. La
+   * resubida a Drive de lo editado sigue en segundo plano, sin esperarla.
+   *
+   * Sin eso en memoria (la ficha viene de antes, o se recargo la pagina) se
+   * cae al camino de siempre: listar la carpeta y bajar archivo por archivo
+   * por Apps Script. Es lento, por eso muestra cuanto falta.
+   */
   async function descargarCarpetaUsuario(dni) {
     const ficha = fichas.get(dni);
     const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
-    if (!folderId) return;
-    await sincronizarSalidaEnDrive(dni);
+    const locales = ficha?.salida?.archivos || [];
+    if (!folderId && !locales.length) return;
 
-    const lista = await drive({ accion: "listar", carpetaId: folderId });
+    const nombre = (ficha?.persona?.nombreCompleto || dni).replace(/[\\/:*?"<>|]+/g, " ").trim() || dni;
     const zip = new JSZip();
-    const root = zip.folder(`${(ficha?.persona?.nombreCompleto || dni).replace(/[\\/:*?"<>|]+/g, " ").trim() || dni}`) || zip;
+    const root = zip.folder(nombre) || zip;
+    // la ultima fase (juntar el ZIP) se reparte en `FASE_ZIP` unidades
+    const FASE_ZIP = 10;
+    let total = 0;
+    let hecho = 0;
+    const avanzar = (texto, n = 1) => {
+      hecho += n;
+      mostrarProgreso(dni, "zip", { hecho: Math.min(hecho, total), total, texto });
+    };
 
-    for (const archivo of lista.archivos || []) {
-      const r = await drive({ accion: "bajar", id: archivo.id });
-      root.file(archivo.name, desdeBase64(r.datos));
+    try {
+      if (locales.length) {
+        total = 2 + FASE_ZIP;
+        mostrarProgreso(dni, "zip", { hecho: 0, total, texto: "armando fotocheck y Word…" });
+        const docs = await documentosActuales(ficha);
+        root.file(docs.nombreFotocheck, docs.pngBlob);
+        avanzar("fotocheck listo");
+        root.file(docs.nombreWord, docs.docx);
+        avanzar("Word listo");
+        for (const a of locales) root.file(a.nombre, a.datos);
+        if (ficha.salidaDesactualizada) sincronizarSalidaEnDrive(dni).catch(() => {});
+      } else {
+        mostrarProgreso(dni, "zip", { hecho: 0, total: 1, texto: "actualizando la carpeta en Drive…" });
+        await sincronizarSalidaEnDrive(dni);
+        const lista = await drive({ accion: "listar", carpetaId: folderId });
+        const archivos = lista.archivos || [];
+        total = archivos.length + FASE_ZIP;
+        for (const archivo of archivos) {
+          const r = await drive({ accion: "bajar", id: archivo.id });
+          root.file(archivo.name, desdeBase64(r.datos));
+          avanzar(`${archivo.name}`);
+        }
+      }
+
+      // PDF, PNG y .docx ya vienen comprimidos por dentro: DEFLATE aca solo
+      // gasta CPU sin bajar el tamano, y eso pesa mas en un celular que en una PC.
+      const base = hecho;
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (meta) => {
+        const n = Math.round((meta.percent / 100) * FASE_ZIP);
+        if (base + n > hecho) avanzar("juntando el ZIP…", base + n - hecho);
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${nombre}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } finally {
+      mostrarProgreso(dni, "zip", null);
     }
-
-    // PDF, PNG y .docx ya vienen comprimidos por dentro: DEFLATE aca solo
-    // gasta CPU sin bajar el tamano, y eso pesa mas en un celular que en una PC.
-    const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(ficha?.persona?.nombreCompleto || dni).replace(/[\\/:*?"<>|]+/g, " ").trim() || dni}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
   /** Anota (o retira) una correccion de un dato de la ficha (EMO, area, nombre,
@@ -814,6 +1004,29 @@ export function montarRenovacion() {
       `<tbody>${filas}</tbody></table></section>`;
   }
 
+  const textoEstadoFicha = (datos) =>
+    datos.cargando ? "cargando…" : datos.guardando ? "guardando…" : datos.consulta ? "consulta" : "renovado";
+
+  /** La foto de la persona en la cabecera de la ficha. Puede ser un data URL
+      (Drive) o el archivo elegido a mano; del archivo se crea una URL una sola
+      vez por foto. */
+  function pintarFoto(card, datos) {
+    const caja = card?.querySelector("[data-foto-persona]");
+    if (!caja) return;
+    let src = "";
+    if (typeof datos.foto === "string") src = datos.foto;
+    else if (datos.foto instanceof Blob) {
+      if (datos.fotoUrl?.de !== datos.foto) {
+        if (datos.fotoUrl) URL.revokeObjectURL(datos.fotoUrl.url);
+        datos.fotoUrl = { de: datos.foto, url: URL.createObjectURL(datos.foto) };
+      }
+      src = datos.fotoUrl.url;
+    }
+    caja.classList.toggle("card-foto-cargando", !src && !datos.fotoResuelta);
+    caja.classList.toggle("card-foto-vacia", !src && Boolean(datos.fotoResuelta));
+    caja.innerHTML = src ? `<img src="${src}" alt="Foto" />` : "";
+  }
+
   function pintarFicha(dni, datos) {
     if (!datos.seleccion) datos.seleccion = new Set();
     fichas.set(dni, datos);
@@ -849,12 +1062,13 @@ export function montarRenovacion() {
         const { edit, tipo, venc, estado } = visibleDe(datos, r);
 
         // la vigencia del certificado, no la fecha en que se dio el curso
-        const venceCert = cert?.fecha ? vencimientoDe(r.codigo, cert.fecha, cert, umbrales().vencido) : "";
-        const fechaDiferente = Boolean(venc && venceCert) && String(venc).trim() !== String(venceCert).trim();
+        const { diferente: fechaDiferente, venceCert } = discrepancia(datos, r.codigo, venc, tipo);
         const contenidoCert =
           `<small>CERTIFICADO · VIGENCIA</small><b>${aFormatoCorto(venceCert) || "sin fecha"}</b>` +
           `<em>curso ${aFormatoCorto(cert?.fecha) || "sin fecha"} · ${escaparHtml(cert?.origen)}</em>`;
-        const certificado = !cert
+        const certificado = datos.cargando
+          ? `<span class="rc-cert cargando">BUSCANDO CERTIFICADO…</span>`
+          : !cert
           ? `<span class="rc-cert falta">SIN CERTIFICADO</span>`
           : cert.descargable
             ? `<button type="button" class="rc-fecha cert-fecha" data-abrir-cert="${r.codigo}" title="Abrir el certificado (PDF) · ${escaparHtml(cert.curso)} · ${escaparHtml(cert.origen)}">${contenidoCert}</button>`
@@ -870,7 +1084,7 @@ export function montarRenovacion() {
         return {
           grupo: grupoDe(tipo),
           html:
-            `<div class="rc ${CLASE_ESTADO[estado] || "rc-noaplica"}${nuevo ? " rc-nuevo" : ""}${!cert ? " rc-sin-cert" : ""}${Object.keys(edit).length ? " rc-editado" : ""}${fechaDiferente ? " rc-fecha-diferente" : ""}" data-codigo="${r.codigo}" data-orden="${orden}">` +
+            `<div class="rc ${CLASE_ESTADO[estado] || "rc-noaplica"}${nuevo ? " rc-nuevo" : ""}${!cert && !datos.cargando ? " rc-sin-cert" : ""}${Object.keys(edit).length ? " rc-editado" : ""}${fechaDiferente ? " rc-fecha-diferente" : ""}" data-codigo="${r.codigo}" data-orden="${orden}">` +
             `<div class="rc-top">` +
             `<label class="rc-sel" title="Seleccionar para aplicar C"${elegibleParaC(datos, r.codigo, tipo) ? "" : " hidden"}>` +
             `<input type="checkbox" data-sel="${r.codigo}" aria-label="Seleccionar ${escaparHtml(r.rotulo)} para aplicar C"${datos.seleccion?.has(r.codigo) ? " checked" : ""} /></label>` +
@@ -878,7 +1092,11 @@ export function montarRenovacion() {
             `<span class="rc-fecha rrcc-fecha"><small>RRCC EN HOJA</small>` +
             `<input type="date" data-venc="${r.codigo}" value="${venc || ""}" aria-label="Vigencia de ${escaparHtml(r.rotulo)}" title="Vigencia en la hoja (editable)" />` +
             `<em data-estado>${estado.toLowerCase()}</em></span>` +
-            `${certificado}</div>`,
+            `${certificado}` +
+            (venceCert
+              ? `<button type="button" class="rc-usar-cert" data-usar-cert="${r.codigo}"${fechaDiferente ? "" : " hidden"} title="Copia en la hoja la vigencia del certificado (queda como cambio sin guardar)">↻ USAR ${aFormatoCorto(venceCert)}</button>`
+              : "") +
+            `</div>`,
         };
       });
 
@@ -902,7 +1120,9 @@ export function montarRenovacion() {
 
     const panelFuente = (origen, titulo, vacio = origen) => {
       const items = inventario.filter((i) => i.origen === origen);
-      const lista = items.length
+      const lista = datos.cargando
+        ? `<div class="cert-vacio cert-buscando">buscando…</div>`
+        : items.length
         ? items.map((it, i) => {
             const indice = inventario.indexOf(it);
             const estado = it.descargable ? "ABRIR PDF" : "SIN CERTIFICADO";
@@ -927,10 +1147,12 @@ export function montarRenovacion() {
 
     /* Lo que importa de un vistazo: de las "A" que la persona tiene, cuantas
        siguen respaldadas por un certificado vigente en las tres fuentes. */
-    const trozos = [
-      `<b class="${res.vigentes.length === res.total ? "st-ok" : "st-err"}">` +
-        `${res.vigentes.length}/${res.total}</b> autorizaciones vigentes`,
-    ];
+    const trozos = datos.cargando
+      ? [`<b class="st-wait">buscando certificados en JOMISER · EIN · Drive…</b>`]
+      : [
+          `<b class="${res.vigentes.length === res.total ? "st-ok" : "st-err"}">` +
+            `${res.vigentes.length}/${res.total}</b> autorizaciones vigentes`,
+        ];
     if (res.porVencer.length) trozos.push(`<b class="st-wait">${res.porVencer.length}</b> por vencer`);
     if (res.vencidos.length) trozos.push(`<b class="st-err">${res.vencidos.length}</b> vencidas`);
     if (res.sinCertificado.length) trozos.push(`<b class="st-err">${res.sinCertificado.length}</b> sin certificado`);
@@ -940,9 +1162,10 @@ export function montarRenovacion() {
     // cambios, para no perderlos de vista mientras se editan tarjetas de abajo
     card.innerHTML =
       `<div class="card-barra">` +
-      `<div class="card-id"><span class="card-dni">${persona.dni}</span>` +
+      `<div class="card-id"><span class="card-foto${datos.fotoResuelta || datos.foto ? "" : " card-foto-cargando"}" data-foto-persona title="Foto de la persona (carpeta FOTOS)"></span>` +
+      `<span class="card-dni">${persona.dni}</span>` +
       `<span class="item-meta">${persona.codigo || ""}</span>` +
-      `<span class="card-n">${datos.consulta ? "consulta" : "renovado"}</span>` +
+      `<span class="card-n" data-card-n>${textoEstadoFicha(datos)}</span>` +
       `<label class="campo-ficha campo-emo${datosEdit.emoVenc !== undefined ? " editado" : ""}" title="Vencimiento del examen médico (EMO). Se imprime en el fotocheck y se puede corregir aquí"><span>EMO VENCE</span>` +
       `<input type="date" data-emo-venc value="${persona.vencimientoEmo || ""}" aria-label="Vencimiento del EMO" /></label>` +
       `<label class="campo-ficha campo-area${datosEdit.area !== undefined ? " editado" : ""}" title="Área de la planilla. Se imprime en el fotocheck y se puede corregir aquí"><span>ÁREA</span>` +
@@ -960,6 +1183,8 @@ export function montarRenovacion() {
       `<span data-edicion-n>${cambiosPendientes(datos)} cambio(s) sin guardar</span>` +
       `<button class="btn btn-warn btn-sm" data-guardar-edicion>GUARDAR CAMBIOS</button>` +
       `<button class="btn btn-ghost btn-sm" data-descartar-edicion>DESCARTAR</button></div>` +
+      `<div class="pendientes" data-pendientes></div>` +
+      `<div class="card-progresos" data-progresos>${htmlProgresos(datos)}</div>` +
       `</div>` +
       `<div class="card-head card-head-ren">` +
       `<span class="card-nom card-nom-editable">` +
@@ -978,6 +1203,7 @@ export function montarRenovacion() {
       `<aside class="certificados-lateral">${panelFuente("EIN", "CERTIFICADOS EIN")}${panelFuente("INDUCCION", "CERTIFICADOS INDUCCION", "inducción")}</aside></div>` +
       (avisos ? `<div class="card-alertas">${avisos}</div>` : "") +
       (enlace ? `<div class="card-acciones">${enlace}</div>` : "");
+    pintarFoto(card, datos);
 
     card.querySelector("[data-fotocheck]")?.addEventListener("click", () => alternarFotocheck(dni));
     card.querySelector("[data-agregar-foto]")?.addEventListener("click", () => agregarFotoPersona(dni));
@@ -1035,8 +1261,12 @@ export function montarRenovacion() {
       marcarOcupado(boton, true);
       try {
         await descargarCarpetaUsuario(dni);
+      } catch (e) {
+        notificar("No se pudo descargar la carpeta", e.message, "warn");
       } finally {
+        // el boton pudo cambiar si la ficha se repinto mientras tanto
         marcarOcupado(boton, false);
+        marcarOcupado(el.resultados.querySelector(`[data-carpeta-zip="${dni}"]`), false);
       }
     });
 
@@ -1118,6 +1348,30 @@ export function montarRenovacion() {
         (valor) => editar(dni, card, codigo, { venc: valor })
       );
     });
+    card.querySelectorAll("[data-usar-cert]").forEach((boton) => {
+      boton.addEventListener("click", () => {
+        const codigo = boton.dataset.usarCert;
+        const ficha = fichas.get(dni);
+        const { venceCert } = discrepancia(ficha, codigo, "", "A");
+        if (!venceCert) return;
+        const campo = card.querySelector(`input[data-venc="${codigo}"]`);
+        if (campo) campo.value = venceCert;
+        editar(dni, card, codigo, { venc: venceCert });
+        const celda = card.querySelector(`.rc[data-codigo="${codigo}"]`);
+        celda?.classList.remove("rc-corregido");
+        void celda?.offsetWidth;
+        celda?.classList.add("rc-corregido");
+      });
+    });
+    pintarPendientes(card, datos);
+
+    // mientras llegan los certificados la ficha solo se mira: lo que se
+    // editara ahora se perderia al pintarla completa
+    card.classList.toggle("ficha-cargando", Boolean(datos.cargando));
+    if (datos.cargando) {
+      for (const control of card.querySelectorAll("input, select, button:not([data-fotocheck])")) control.disabled = true;
+    }
+
     card.querySelector("[data-guardar-edicion]").addEventListener("click", () => guardarEdiciones(dni, card));
     card.querySelector("[data-descartar-edicion]").addEventListener("click", () => {
       fichas.get(dni).ediciones = {};
@@ -1303,7 +1557,7 @@ export function montarRenovacion() {
     volver.focus();
 
     try {
-      const r = await descargar({ id: cert.id, origen: cert.origen, ...(cert.datosDescarga || {}) });
+      const r = await descargarCertificado(cert);
       if (cerrado) return;
       if (r.sinCertificado) throw new Error(r.motivo || "sin certificado emitido");
       url = URL.createObjectURL(new Blob([r.pdf], { type: "application/pdf" }));
@@ -1359,10 +1613,15 @@ export function montarRenovacion() {
         consola(`${contexto.cursos.length} alias de curso, ${contexto.matriz.length} fila(s) de matriz`, "ok");
       }
 
+      // mientras se procesa a una persona ya se buscan los certificados de las
+      // siguientes: no pasan por Apps Script, asi que no le quitan turno a nada
+      const inventarioDe = adelantarInventarios(lista.map((o) => o.dni), senal);
+
       for (const [i, obj] of lista.entries()) {
         if (senal.aborted) break;
         barra.set(hechas, lista.length, `${obj.dni} · leyendo`);
         consola.cabecera(`[${i + 1}/${lista.length}] DNI ${obj.dni}`);
+        const inventario = inventarioDe(i);
 
         try {
           // el fotocheck antiguo adjuntado a mano (botones de la ficha) no viene
@@ -1384,37 +1643,17 @@ export function montarRenovacion() {
           // aprovechando que la fila de Apps Script queda libre mientras se
           // consultan JOMISER, EIN y Drive.
           const fotoP = fotoDeDni(obj.dni, senal).catch(() => null);
+          // la foto se pinta en cuanto llega, en la ficha que haya en ese
+          // momento (la preliminar o la completa)
+          fotoP.then((foto) => {
+            const actual = fichas.get(obj.dni);
+            if (!foto || !actual?.persona || actual.foto) return;
+            actual.foto = foto;
+            pintarFoto(el.resultados.querySelector(`[data-dni="${obj.dni}"]`), actual);
+            refrescarFotocheck(obj.dni);
+          });
           let antiguoP = null;
-          const alLeer = (p) => {
-            if (!antiguoManual && p.fotocheckAntiguoDriveId) {
-              antiguoP = fotoAntigua(p.fotocheckAntiguoDriveId, senal).catch(() => null);
-            }
-          };
-
-          const r = soloConsulta
-            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer })
-            : await renovarPersona(obj.dni, contexto, {
-                log: consola,
-                senal,
-                escribir: el.escribir.checked,
-                alLeer,
-              });
-
-          if (r.estado === "nuevo") {
-            nuevos.push(obj.dni);
-            pintarFicha(obj.dni, { error: "no está en la base — usa la pestaña NUEVO PERSONAL" });
-            hechas++;
-            continue;
-          }
-
-          const ficha = {
-            persona: r.despues,
-            detalle: r.detalle,
-            alertas: r.alertas,
-            resumen: r.resumen,
-            inventario: r.inventario?.items || [],
-            fila: r.fila,
-            valores: r.enHoja,
+          const comunes = () => ({
             ediciones: {},
             datosEdit: {},
             seleccion: new Set(),
@@ -1424,8 +1663,70 @@ export function montarRenovacion() {
             antiguoReversoFile,
             antiguo: antiguoManual,
             fotoManual,
+            foto: fichas.get(obj.dni)?.foto || null,
+          });
+          // Etapa 1: la fila de la hoja ya se leyo. Se pinta la ficha con sus
+          // datos y fechas (solo para mirar) mientras llegan los certificados.
+          const alLeer = (p, registro) => {
+            if (!antiguoManual && p.fotocheckAntiguoDriveId) {
+              antiguoP = fotoAntigua(p.fotocheckAntiguoDriveId, senal).catch(() => null);
+            }
+            if (!registro?.valores) return;
+            pintarFicha(obj.dni, {
+              ...comunes(),
+              persona: p,
+              detalle: [],
+              alertas: [],
+              inventario: [],
+              fila: registro.fila,
+              valores: registro.valores,
+              cargando: true,
+            });
           };
-          pintarFicha(obj.dni, ficha);
+          // Etapa 2: certificados cruzados con la hoja. Se pinta la ficha
+          // completa sin esperar a que la escritura termine de hacer fila en
+          // Apps Script; la cabecera dice "guardando…" hasta que confirme.
+          let ficha = null;
+          const alCalcular = (parcial) => {
+            ficha = {
+              ...comunes(),
+              persona: parcial.despues,
+              detalle: parcial.detalle,
+              alertas: parcial.alertas,
+              resumen: soloConsulta ? resumenAutorizaciones(parcial.detalle) : undefined,
+              inventario: parcial.inventario?.items || [],
+              fila: parcial.fila,
+              valores: parcial.enHoja,
+              guardando: !soloConsulta && el.escribir.checked,
+            };
+            pintarFicha(obj.dni, ficha);
+          };
+
+          const r = soloConsulta
+            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer, alCalcular, inventario })
+            : await renovarPersona(obj.dni, contexto, {
+                log: consola,
+                senal,
+                escribir: el.escribir.checked,
+                alLeer,
+                alCalcular,
+                inventario,
+              });
+
+          if (r.estado === "nuevo") {
+            nuevos.push(obj.dni);
+            pintarFicha(obj.dni, { error: "no está en la base — usa la pestaña NUEVO PERSONAL" });
+            hechas++;
+            continue;
+          }
+
+          if (!ficha) alCalcular(r);
+          ficha.resumen = r.resumen;
+          if (ficha.guardando) {
+            ficha.guardando = false;
+            const n = el.resultados.querySelector(`[data-dni="${obj.dni}"] [data-card-n]`);
+            if (n) n.textContent = textoEstadoFicha(ficha);
+          }
           if (r.resumen) {
             consola(
               `${r.resumen.vigentes.length}/${r.resumen.total} autorizaciones vigentes` +
@@ -1441,7 +1742,7 @@ export function montarRenovacion() {
           // este punto no se sabe todavia si hay foto o no, y la tarjeta no
           // debe ofrecer "agregar foto" mientras se sigue buscando. Casi
           // siempre la foto ya llego mientras se leia el inventario.
-          ficha.foto = (await fotoP) || fotoManual;
+          ficha.foto = ficha.foto || (await fotoP) || fotoManual;
           ficha.fotoResuelta = true;
           pintarFicha(obj.dni, ficha);
           refrescarFotocheck(obj.dni);
@@ -1458,32 +1759,45 @@ export function montarRenovacion() {
             // lee a la siguiente: las descargas y la busqueda no pasan por
             // Apps Script, asi que se solapan. Se genera una carpeta a la vez
             // para no mezclar sus subidas.
-            await salidaEnCurso;
-            if (senal.aborted) break;
             const dni = obj.dni;
+            mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "en espera de la carpeta anterior…" });
+            await salidaEnCurso;
+            if (senal.aborted) {
+              mostrarProgreso(dni, "salida", null);
+              break;
+            }
             const varias = lista.length > 1;
             const logSalida = varias ? (m, t) => consola(`[${dni}] ${m}`, t) : consola;
             barra.set(hechas, lista.length, `${dni} · generando salidas`);
+            // el reloj del tiempo restante arranca aca, no mientras se esperaba turno
+            if (fichas.get(dni)?.progreso) delete fichas.get(dni).progreso.salida;
+            mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "creando la carpeta…" });
             salidaEnCurso = generarSalidas(r, contexto, {
               log: logSalida,
               senal,
-              avance: (hecho, total, que) => barra.set(hechas, lista.length, `${dni} · ${que}`),
+              avance: (hecho, total, que) => {
+                barra.set(hechas, lista.length, `${dni} · ${que}`);
+                mostrarProgreso(dni, "salida", { hecho, total, texto: que });
+              },
               antiguoManual,
               material: { foto: ficha.foto, antiguo: antiguoP },
-            }).then(
-              (salida) => {
-                ficha.salida = salida;
-                if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
-                conSalida++;
-                pintarFicha(dni, ficha);
-                el.resCount.textContent = `${hechas}/${lista.length} · ${conSalida} con salidas`;
-              },
-              (e) => {
-                if (senal.aborted) return;
-                fallos++;
-                logSalida(`no se pudo generar la carpeta: ${e.message}`, "err");
-              }
-            );
+            })
+              .then(
+                (salida) => {
+                  ficha.salida = salida;
+                  if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
+                  conSalida++;
+                  mostrarProgreso(dni, "salida", null);
+                  pintarFicha(dni, ficha);
+                  el.resCount.textContent = `${hechas}/${lista.length} · ${conSalida} con salidas`;
+                },
+                (e) => {
+                  mostrarProgreso(dni, "salida", null);
+                  if (senal.aborted) return;
+                  fallos++;
+                  logSalida(`no se pudo generar la carpeta: ${e.message}`, "err");
+                }
+              );
           }
         } catch (e) {
           if (senal.aborted) break;
