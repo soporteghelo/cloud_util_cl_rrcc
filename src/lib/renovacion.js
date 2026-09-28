@@ -509,12 +509,14 @@ export async function generarSalidas(
       });
 
   /* --- fotocheck + Word (en el navegador, en paralelo con las descargas) --- */
+  const nombreFotocheck = `FOTOCHECK_${persona.nombreCompleto || persona.dni}.png`;
+  const nombreWord = `Autorizacion_RRCC_${persona.nombreCompleto || persona.dni}.docx`;
   const documentosP = (async () => {
     const foto = await fotoP;
     const png = await fotocheckPng(persona, { foto });
     const [pngBase64, pngBytes] = await Promise.all([blobABase64(png.blob), png.blob.arrayBuffer()]);
     const fotocheckSubido = subir({
-      nombre: `FOTOCHECK_${persona.nombreCompleto || persona.dni}.png`,
+      nombre: nombreFotocheck,
       mime: "image/png",
       datos: pngBase64,
     }).then((r) => {
@@ -535,7 +537,7 @@ export async function generarSalidas(
       },
     });
     const wordSubido = subir({
-      nombre: `Autorizacion_RRCC_${persona.nombreCompleto || persona.dni}.docx`,
+      nombre: nombreWord,
       mime: MIME_DOCX,
       datos: await blobABase64(docx),
     }).then((r) => {
@@ -654,7 +656,47 @@ export async function generarSalidas(
   // la carpeta es lo unico obligatorio: si no se pudo crear, ese es el error
   salida.carpetaId = (await carpetaP).carpetaId;
   await documentosP;
+
+  await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFotocheck, nombreWord], { log, senal });
   return salida;
+}
+
+/** Espacios repetidos y bordes fuera: la cuenta de servicio limpia asi los nombres al subir. */
+const mismoNombre = (n) => String(n || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * La carpeta queda solo con lo de ESTA renovacion: lo que habia de corridas
+ * anteriores (certificados que ya no aplican, los quitados con la "x", un
+ * fotocheck con otro nombre...) se manda a la papelera de Drive.
+ *
+ * Se hace AL FINAL, con todo lo nuevo ya arriba: si algo falla a mitad de
+ * camino la carpeta no queda vacia. Lo que esta renovacion intento subir se
+ * conserva aunque la subida haya fallado, porque la version anterior tiene el
+ * mismo nombre y es mejor que nada. Un fallo al limpiar solo se avisa.
+ */
+export async function limpiarCarpeta(salida, pedidos, { log = () => {}, senal } = {}) {
+  const conservar = new Set(
+    [...pedidos, ...salida.certificados.map((c) => c.nombre), salida.fotocheck?.nombre, salida.word?.nombre]
+      .filter(Boolean)
+      .map(mismoNombre)
+  );
+  try {
+    const { archivos = [] } = await drive({ accion: "listar", carpetaId: salida.carpetaId }, senal);
+    const viejos = [
+      ...new Set(
+        archivos
+          .filter((a) => a.mimeType !== "application/vnd.google-apps.folder" && !conservar.has(mismoNombre(a.name)))
+          .map((a) => a.name)
+      ),
+    ];
+    if (!viejos.length) return;
+    await drive({ accion: "eliminar", carpetaId: salida.carpetaId, nombres: viejos }, senal);
+    salida.eliminados = viejos;
+    log(`${viejos.length} archivo(s) de renovaciones anteriores enviados a la papelera: ${viejos.join(", ")}`, "ok");
+  } catch (e) {
+    if (senal?.aborted) throw e;
+    log(`  no se pudieron quitar los archivos anteriores de la carpeta: ${e.message}`, "warn");
+  }
 }
 
 /**

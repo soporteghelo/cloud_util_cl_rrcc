@@ -818,6 +818,17 @@ export function montarRenovacion() {
           datos: await blobABase64(docs.docx),
         });
 
+        // si se corrigio el nombre, el fotocheck y el Word del nombre anterior
+        // quedarian duplicados en la carpeta: van a la papelera
+        const anteriores = [ficha.salida?.fotocheck?.nombre, ficha.salida?.word?.nombre].filter(
+          (n) => n && n !== fotocheckSubido.nombre && n !== wordSubido.nombre
+        );
+        if (anteriores.length) {
+          drive({ accion: "eliminar", carpetaId: folderId, nombres: anteriores }).catch((e) =>
+            consola(`  no se pudo quitar ${anteriores.join(", ")} de la carpeta: ${e.message}`, "warn")
+          );
+        }
+
         ficha.salida = { ...(ficha.salida || {}), carpetaId: folderId, fotocheck: fotocheckSubido, word: wordSubido };
         ficha.salidaDesactualizada = false;
         return true;
