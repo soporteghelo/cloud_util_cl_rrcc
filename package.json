@@ -13,7 +13,8 @@
     "migrar": "node scripts/migrar-excel.js"
   },
   "dependencies": {
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "vite": "^5.4.10"

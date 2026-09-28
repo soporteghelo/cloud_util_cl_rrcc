@@ -9,12 +9,13 @@
  */
 
 import JSZip from "jszip";
-import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTexto, estimarRestante, textoRestante } from "./comun.js";
+import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTexto, estimarRestante, textoRestante, descargarBlob } from "./comun.js";
+import { montarPdf } from "./visor-pdf.js";
 import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
 import { drive, desdeBase64, blobABase64 } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -831,6 +832,98 @@ export function montarRenovacion() {
     return tarea;
   }
 
+  /* ---------------- certificados quitados con la "x" ---------------- */
+
+  /**
+   * Certificados de EIN / Drive que se quitaron de la carpeta de la persona,
+   * por DNI -> Map(clave del certificado -> nombres de archivo). Vive en la
+   * sesion: no se suben al armar la carpeta ni entran al ZIP.
+   */
+  const excluidos = new Map();
+  const excluidosDe = (dni) => new Set(excluidos.get(dni)?.keys() || []);
+  const nombresExcluidos = (dni) => new Set([...(excluidos.get(dni)?.values() || [])].flat());
+
+  /**
+   * La "x": marca el certificado como quitado, lo saca de lo que ya esta en
+   * memoria para el ZIP y, si la persona ya tiene carpeta en Drive, manda a
+   * la papelera la copia que haya ahi. Otro toque lo devuelve a la lista.
+   */
+  async function alternarExcluido(dni, cert, boton) {
+    if (!cert) return;
+    const clave = claveCertificado(cert);
+    const propios = excluidos.get(dni) || new Map();
+    excluidos.set(dni, propios);
+    if (propios.has(clave)) {
+      propios.delete(clave);
+      pintarExcluido(dni, clave, false);
+      await reincluir(dni, cert, boton);
+      return;
+    }
+    const nombres = nombresEnCarpeta(cert);
+    propios.set(clave, nombres);
+    pintarExcluido(dni, clave, true);
+
+    const ficha = fichas.get(dni);
+    if (ficha?.salida?.archivos) ficha.salida.archivos = ficha.salida.archivos.filter((a) => !nombres.includes(a.nombre));
+    const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
+    if (!folderId) return;
+    marcarOcupado(boton, true);
+    try {
+      const r = await drive({ accion: "eliminar", carpetaId: folderId, nombres });
+      if (r.eliminados?.length) consola(`${dni}: ${r.eliminados.join(", ")} enviado(s) a la papelera de Drive`, "ok");
+    } catch (e) {
+      const viejo = /accion desconocida/i.test(e.message);
+      notificar(
+        "No se pudo quitar de la carpeta",
+        viejo
+          ? "El Apps Script publicado no tiene la acción \"eliminar\": hay que volver a desplegar Code.gs. Igual queda fuera del ZIP."
+          : `${e.message}. Igual queda fuera del ZIP.`,
+        "warn"
+      );
+    } finally {
+      marcarOcupado(boton, false);
+    }
+  }
+
+  /**
+   * Deshacer la "x" cuando la carpeta ya estaba armada: el certificado vuelve
+   * al ZIP en memoria y se sube otra vez a Drive, sin regenerar todo.
+   */
+  async function reincluir(dni, cert, boton) {
+    const ficha = fichas.get(dni);
+    const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
+    if (!ficha?.salida || !cert.descargable) return;
+    const nombre = nombreEnCarpeta(cert);
+    marcarOcupado(boton, true);
+    try {
+      const r = await descargarCertificado(cert);
+      if (r.sinCertificado) return;
+      if (Array.isArray(ficha.salida.archivos) && !ficha.salida.archivos.some((a) => a.nombre === nombre)) {
+        ficha.salida.archivos.push({ nombre, datos: r.pdf });
+      }
+      if (folderId) {
+        await drive({ accion: "subir", carpetaId: folderId, nombre, mime: "application/pdf", datos: await blobABase64(new Blob([r.pdf], { type: "application/pdf" })) });
+        consola(`${dni}: ${nombre} vuelve a la carpeta de Drive`, "ok");
+      }
+    } catch (e) {
+      notificar("No se pudo volver a agregar el certificado", e.message, "warn");
+    } finally {
+      marcarOcupado(boton, false);
+    }
+  }
+
+  function pintarExcluido(dni, clave, fuera) {
+    const card = el.resultados.querySelector(`[data-dni="${dni}"]`) || el.resultados;
+    card.querySelectorAll(`[data-cert-clave="${CSS.escape(clave)}"]`).forEach((fila) => {
+      fila.classList.toggle("excluido", fuera);
+      const x = fila.querySelector("[data-cert-x]");
+      if (!x) return;
+      x.textContent = fuera ? "↺" : "×";
+      x.title = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
+      x.setAttribute("aria-label", x.title);
+    });
+  }
+
   /**
    * ZIP de la carpeta de la persona.
    *
@@ -870,13 +963,15 @@ export function montarRenovacion() {
         avanzar("fotocheck listo");
         root.file(docs.nombreWord, docs.docx);
         avanzar("Word listo");
-        for (const a of locales) root.file(a.nombre, a.datos);
+        const fuera = nombresExcluidos(dni);
+        for (const a of locales) if (!fuera.has(a.nombre)) root.file(a.nombre, a.datos);
         if (ficha.salidaDesactualizada) sincronizarSalidaEnDrive(dni).catch(() => {});
       } else {
         mostrarProgreso(dni, "zip", { hecho: 0, total: 1, texto: "actualizando la carpeta en Drive…" });
         await sincronizarSalidaEnDrive(dni);
         const lista = await drive({ accion: "listar", carpetaId: folderId });
-        const archivos = lista.archivos || [];
+        const fuera = nombresExcluidos(dni);
+        const archivos = (lista.archivos || []).filter((a) => !fuera.has(a.name));
         total = archivos.length + FASE_ZIP;
         for (const archivo of archivos) {
           const r = await drive({ accion: "bajar", id: archivo.id });
@@ -1126,8 +1221,14 @@ export function montarRenovacion() {
         ? items.map((it, i) => {
             const indice = inventario.indexOf(it);
             const estado = it.descargable ? "ABRIR PDF" : "SIN CERTIFICADO";
-            return `<button class="cert-item${it.descargable ? "" : " disabled"}" data-cert="${indice}" ${it.descargable ? "" : "disabled"} title="${escaparHtml(it.archivo || it.curso || "")}">` +
-              `<b>${escaparHtml(it.curso || "Certificado")}</b><span>${[aFormatoCorto(it.fecha) || (origen === "INDUCCION" ? "" : "sin fecha"), estado].filter(Boolean).join(" · ")}</span></button>`;
+            const clave = claveCertificado(it);
+            const fuera = excluidos.get(dni)?.has(clave);
+            const tituloX = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
+            // la "x" va aparte del boton que abre el PDF: un <button> no puede ir dentro de otro
+            return `<div class="cert-fila${fuera ? " excluido" : ""}" data-cert-clave="${escaparHtml(clave)}">` +
+              `<button class="cert-item${it.descargable ? "" : " disabled"}" data-cert="${indice}" ${it.descargable ? "" : "disabled"} title="${escaparHtml(it.archivo || it.curso || "")}">` +
+              `<b>${escaparHtml(it.curso || "Certificado")}</b><span>${[aFormatoCorto(it.fecha) || (origen === "INDUCCION" ? "" : "sin fecha"), estado].filter(Boolean).join(" · ")}</span></button>` +
+              `<button type="button" class="cert-x" data-cert-x="${indice}" title="${tituloX}" aria-label="${tituloX}">${fuera ? "↺" : "×"}</button></div>`;
           }).join("")
         : `<div class="cert-vacio">No se encontraron certificados de ${vacio}.</div>`;
       return `<section class="cert-panel cert-${origen.toLowerCase()}"><div class="cert-head">${titulo}<span>${items.length}</span></div>${lista}</section>`;
@@ -1296,6 +1397,11 @@ export function montarRenovacion() {
     }
     card.querySelectorAll("[data-cert]").forEach((boton) => {
       boton.addEventListener("click", () => abrirCertificado(fichas.get(dni)?.inventario?.[Number(boton.dataset.cert)]));
+    });
+    card.querySelectorAll("[data-cert-x]").forEach((boton) => {
+      boton.addEventListener("click", () =>
+        alternarExcluido(dni, fichas.get(dni)?.inventario?.[Number(boton.dataset.certX)], boton)
+      );
     });
     card.querySelectorAll("[data-abrir-cert]").forEach((boton) => {
       boton.addEventListener("click", () => {
@@ -1524,47 +1630,104 @@ export function montarRenovacion() {
    * El certificado se abre en una capa a pantalla completa por encima de todo
    * y se cierra con VOLVER o Escape. La ficha de atras no se toca, asi las
    * ediciones sin guardar siguen ahi al regresar.
+   *
+   * Al cerrar, la capa NO se destruye: se oculta y queda guardada por
+   * certificado. Aunque el PDF ya este en memoria (`descargarCertificado`),
+   * un <iframe> nuevo obliga al navegador a volver a abrir y dibujar el PDF
+   * desde cero, y eso es lo que se veia como "carga de nuevo". Reabrir
+   * muestra la misma capa, con el PDF ya dibujado y en la pagina donde se
+   * dejo. Todo vive en memoria: al recargar la pagina se pierde.
    */
+  const visores = new Map(); // clave del certificado -> { visor, url, listo }
+  const MAX_VISORES = 15;
+  let visorAbierto = null;
+
+  function cerrarVisor() {
+    if (!visorAbierto) return;
+    const { entrada, previo } = visorAbierto;
+    visorAbierto = null;
+    document.removeEventListener("keydown", alTeclearVisor);
+    if (entrada.listo) {
+      entrada.visor.hidden = true;
+    } else {
+      // un error o una carga a medias no se guarda: la proxima vez se reintenta
+      if (entrada.url) URL.revokeObjectURL(entrada.url);
+      entrada.visor.remove();
+      visores.delete(entrada.clave);
+    }
+    previo?.focus?.();
+  }
+
+  function alTeclearVisor(ev) {
+    if (ev.key === "Escape") cerrarVisor();
+  }
+
   async function abrirCertificado(cert) {
     if (!cert?.descargable) return;
+    cerrarVisor();
     const previo = document.activeElement;
-    const visor = document.createElement("div");
-    visor.className = "visor-modal";
-    visor.setAttribute("role", "dialog");
-    visor.setAttribute("aria-modal", "true");
-    visor.setAttribute("aria-label", "Certificado");
-    visor.innerHTML =
-      `<div class="visor-head"><button class="btn btn-ghost btn-sm" data-volver>← VOLVER</button>` +
-      `<span>${escaparHtml(cert.curso)} · ${escaparHtml(cert.origen)}</span></div>` +
-      `<div class="visor-carga">Cargando certificado...</div>`;
-    document.body.appendChild(visor);
+    const clave = claveCertificado(cert);
 
-    let url = "";
-    let cerrado = false;
-    const cerrar = () => {
-      cerrado = true;
-      if (url) URL.revokeObjectURL(url);
-      document.removeEventListener("keydown", alTeclear);
-      visor.remove();
-      previo?.focus?.();
-    };
-    const alTeclear = (ev) => {
-      if (ev.key === "Escape") cerrar();
-    };
-    document.addEventListener("keydown", alTeclear);
-    const volver = visor.querySelector("[data-volver]");
-    volver.addEventListener("click", cerrar);
-    volver.focus();
+    let entrada = visores.get(clave);
+    if (entrada) {
+      // al final del Map = el usado mas recientemente
+      visores.delete(clave);
+      visores.set(clave, entrada);
+    } else {
+      const visor = document.createElement("div");
+      visor.className = "visor-modal";
+      visor.setAttribute("role", "dialog");
+      visor.setAttribute("aria-modal", "true");
+      visor.setAttribute("aria-label", "Certificado");
+      visor.innerHTML =
+        `<div class="visor-head"><button class="btn btn-ghost btn-sm" data-volver>← VOLVER</button>` +
+        `<span class="visor-titulo">${escaparHtml(cert.curso)} · ${escaparHtml(cert.origen)}</span>` +
+        `<button class="btn btn-ghost btn-sm" data-descargar hidden>DESCARGAR</button></div>` +
+        `<div class="visor-carga">Cargando certificado...</div>`;
+      visor.querySelector("[data-volver]").addEventListener("click", cerrarVisor);
+      document.body.appendChild(visor);
+      entrada = { clave, visor, url: "", listo: false };
+      visores.set(clave, entrada);
+
+      // los mas viejos se sueltan para no acumular PDFs dibujados sin limite
+      while (visores.size > MAX_VISORES) {
+        const [claveVieja, vieja] = visores.entries().next().value;
+        visores.delete(claveVieja);
+        if (vieja.url) URL.revokeObjectURL(vieja.url);
+        vieja.visor.remove();
+      }
+    }
+
+    entrada.visor.hidden = false;
+    visorAbierto = { entrada, previo };
+    document.addEventListener("keydown", alTeclearVisor);
+    entrada.visor.querySelector("[data-volver]").focus();
+    if (entrada.listo) return;
 
     try {
       const r = await descargarCertificado(cert);
-      if (cerrado) return;
+      if (visores.get(clave) !== entrada) return; // se cerro y se descarto
       if (r.sinCertificado) throw new Error(r.motivo || "sin certificado emitido");
-      url = URL.createObjectURL(new Blob([r.pdf], { type: "application/pdf" }));
-      visor.querySelector(".visor-carga").outerHTML = `<iframe class="visor-pdf" title="Certificado" src="${url}"></iframe>`;
+      // en el celular el PDF se dibuja con pdf.js: un <iframe> ahi no se ve
+      const { url } = await montarPdf(entrada.visor.querySelector(".visor-carga"), r.pdf, { titulo: cert.curso || "Certificado" });
+      if (visores.get(clave) !== entrada) {
+        if (url) URL.revokeObjectURL(url);
+        return;
+      }
+      entrada.url = url;
+      const descargar = entrada.visor.querySelector("[data-descargar]");
+      descargar.hidden = false;
+      descargar.addEventListener("click", () =>
+        descargarBlob(
+          new Blob([r.pdf], { type: "application/pdf" }),
+          `${(cert.archivo || cert.curso || "certificado").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, " ")}.pdf`
+        )
+      );
+      entrada.listo = true;
     } catch (e) {
-      if (cerrado) return;
-      visor.querySelector(".visor-carga").outerHTML = `<div class="visor-error">No se pudo abrir el certificado: ${escaparHtml(e.message)}</div>`;
+      if (visores.get(clave) !== entrada) return;
+      entrada.visor.querySelector(".visor-carga").outerHTML =
+        `<div class="visor-error">No se pudo abrir el certificado: ${escaparHtml(e.message)}</div>`;
     }
   }
 
@@ -1774,6 +1937,7 @@ export function montarRenovacion() {
             mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "creando la carpeta…" });
             salidaEnCurso = generarSalidas(r, contexto, {
               log: logSalida,
+              excluidos: excluidosDe(dni),
               senal,
               avance: (hecho, total, que) => {
                 barra.set(hechas, lista.length, `${dni} · ${que}`);

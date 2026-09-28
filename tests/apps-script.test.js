@@ -83,8 +83,11 @@ function hojaSimulada(nombre, columnas) {
 
 function cargar(hoja) {
   const libro = { getSheets: () => [hoja], getSheetByName: () => null, getId: () => "x" };
+  const cache = new Map();
   const sandbox = {
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => "" }) },
+    CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) ?? null, put: (k, v) => cache.set(k, v) }) },
+    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     SpreadsheetApp: { openById: () => libro, flush() {}, CopyPasteType: { PASTE_FORMULA: "PASTE_FORMULA" } },
     ContentService: {},
     DriveApp: {},
@@ -149,6 +152,26 @@ test("guardar escribe fechas y tipos pero no pisa las formulas de ESTADO", () =>
   assert.equal(hoja.celda(4, IE_ESTADO).v, "(calculado)", "y nadie las sobrescribio con texto");
   const iMin = api.CABECERA.indexOf("FECHA MINIMA") + 1;
   assert.equal(hoja.celda(4, iMin).f, "=MIN(Q4,U4)", "cualquier otra formula tambien se respeta");
+});
+
+test("una escritura vieja que termina tarde no revierte un guardado posterior", () => {
+  // Google devuelve una pagina rota con el script todavia corriendo y el puente
+  // reintenta: la ejecucion vieja (la renovacion con la fecha del certificado)
+  // podia terminar DESPUES de la correccion a mano y devolver la fila a lo anterior.
+  const hoja = hojaSimulada("BD_AESA", 98);
+  const api = cargar(hoja);
+  hojaConPersona(api, hoja);
+  const conFecha = (f) => filaDe(api, { "Fecha de capacitacion_IE": f, TIPO_IE: "A" });
+
+  api.guardar({ fila: 4, valores: conFecha("2025-11-26"), marca: 1000 }); // renovacion
+  api.guardar({ fila: 4, valores: conFecha("2025-11-13"), marca: 2000 }); // correccion a mano
+  const tarde = api.guardar({ fila: 4, valores: conFecha("2025-11-26"), marca: 1000 }); // la vieja, tarde
+
+  assert.equal(tarde.obsoleto, true, "se reconoce como vieja");
+  assert.equal(hoja.celda(4, IE_CAP).v, "2025-11-13", "la correccion a mano se queda");
+
+  const reintento = api.guardar({ fila: 4, valores: conFecha("2025-11-13"), marca: 2000 });
+  assert.equal(reintento.obsoleto, undefined, "un reintento del mismo guardado si se escribe");
 });
 
 test("guardar deja formula en un ESTADO que estaba como texto", () => {

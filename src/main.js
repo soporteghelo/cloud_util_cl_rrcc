@@ -28,6 +28,7 @@ import { montarNuevo } from "./vistas/nuevo.js";
 import { montarEstado } from "./vistas/estado.js";
 import { montarEstadoTotal } from "./vistas/estado-total.js";
 import { montarModalFotocheck } from "./vistas/fotocheck-modal.js";
+import { abrirVisorPdf } from "./vistas/visor-pdf.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -334,6 +335,16 @@ const ORDEN_ORIGEN = ["JOMISER", "EIN", "DRIVE", "INDUCCION"];
 const obtenido = (it) => Boolean(it.pdf || it.guardado);
 const totalObtenidos = () => resultados.reduce((n, r) => n + r.items.filter(obtenido).length, 0);
 
+function verCertificado(obj, it) {
+  if (!it.pdf) return;
+  abrirVisorPdf({
+    titulo: it.curso || "Certificado",
+    subtitulo: `${obj.dni} · ${it.origen}`,
+    pdf: it.pdf,
+    nombre: `${obj.dni}_${String(it.curso || "certificado").replace(/[\\/:*?"<>|]+/g, " ").trim()}.pdf`,
+  });
+}
+
 function pintar() {
   el.panelRes.hidden = false;
   el.resultados.innerHTML = "";
@@ -374,13 +385,27 @@ function pintar() {
     for (const it of obj.items) {
       const fila = document.createElement("div");
       fila.className = "item";
+      // lo que ya esta en memoria se abre en el visor, sin descargarlo
+      if (it.pdf) {
+        fila.classList.add("item-ver");
+        fila.tabIndex = 0;
+        fila.setAttribute("role", "button");
+        fila.title = "Ver certificado";
+        fila.addEventListener("click", () => verCertificado(obj, it));
+        fila.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
+          ev.preventDefault();
+          verCertificado(obj, it);
+        });
+      }
       const clase = it.error ? "st-err" : CLASE_ESTADO[it.estado] || "st-skip";
       const etiqueta = it.error ? "ERROR" : it.estado;
       fila.innerHTML =
         `<span class="item-origen or-${it.origen}">${it.origen}</span>` +
         `<span class="item-txt">${it.curso} <span class="item-meta">· ${it.fecha}</span>` +
         `${it.error ? `<br><span class="item-meta">${it.error}</span>` : ""}</span>` +
-        `<span class="item-st ${clase}">${etiqueta}</span>`;
+        `<span class="item-st ${clase}">${etiqueta}</span>` +
+        (it.pdf ? `<span class="item-ver-tag">VER</span>` : "");
       cont.appendChild(fila);
     }
     if (!obj.items.length) {

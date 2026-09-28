@@ -234,6 +234,38 @@ test("no se pisa una capacitacion con un certificado mas viejo", () => {
   assert.equal(ta.cambio, "SIN CAMBIO");
 });
 
+test("no se pisa una fecha de la hoja que sigue vigente aunque el certificado sea mas nuevo", () => {
+  // corregida a mano: cada renovacion la devolvia a la del certificado
+  const fila = filaVacia();
+  fila[colCap("TA")] = "2026-08-13";
+  fila[colTipo("TA")] = "A";
+  const r = renovarFila({
+    fila,
+    hoy: HOY,
+    diccionario: dic,
+    items: [{ curso: "TRABAJOS EN ALTURA", fecha: "2026-08-26", origen: "DRIVE" }],
+  });
+  const ta = r.detalle.find((d) => d.codigo === "TA");
+  assert.equal(ta.cap, "2026-08-13", "se queda la de la hoja");
+  assert.equal(ta.cambio, "SIN CAMBIO");
+  assert.equal(ta.certificado.fecha, "2026-08-26", "el certificado sigue a mano para ofrecer USAR");
+});
+
+test("una fecha de la hoja por vencer si se actualiza con un certificado mas nuevo", () => {
+  const fila = filaVacia();
+  fila[colCap("TA")] = "2025-10-01"; // 355 dias: ACTUALIZAR
+  fila[colTipo("TA")] = "A";
+  const r = renovarFila({
+    fila,
+    hoy: HOY,
+    diccionario: dic,
+    items: [{ curso: "TRABAJOS EN ALTURA", fecha: "2026-09-01", origen: "DRIVE" }],
+  });
+  const ta = r.detalle.find((d) => d.codigo === "TA");
+  assert.equal(ta.cap, "2026-09-01");
+  assert.equal(ta.cambio, "ACTUALIZADO");
+});
+
 test('una "A" sin certificado vigente se mantiene y se avisa', () => {
   const r = renovarFila({ fila: personaDePrueba(), hoy: HOY, diccionario: dic, items: [] });
   const ob = r.detalle.find((d) => d.codigo === "OB");

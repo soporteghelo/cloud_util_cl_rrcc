@@ -18,6 +18,7 @@
  *               y el navegador decide cuando hacer esa consulta mas lenta.
  *   bajar    ->  { id } el contenido de un archivo, en base64
  *   listar   ->  { carpetaId } que quedo dentro
+ *   eliminar ->  { carpetaId, nombres } manda esos archivos a la papelera
  *
  * Un archivo por llamada, igual que /api/download: la funcion tiene 60 s y
  * 4.5 MB por peticion, asi que quien va encadenando es el navegador.
@@ -29,6 +30,7 @@ import {
   bajarArchivo,
   infoArchivo,
   listarCarpeta,
+  eliminarDeCarpeta,
   buscarFoto,
   carpetaSalidas,
   carpetaFotos,
@@ -155,6 +157,13 @@ async function accionListar({ carpetaId }) {
   return { ok: true, archivos: await listarCarpeta(carpetaId) };
 }
 
+/** Manda a la papelera los archivos con esos nombres (certificados quitados con la "x"). */
+async function accionEliminar({ carpetaId, nombres }) {
+  if (!carpetaId) throw new Error("falta carpetaId");
+  if (!Array.isArray(nombres) || !nombres.length) throw new Error("falta la lista de nombres");
+  return { ok: true, eliminados: await eliminarDeCarpeta(carpetaId, nombres.map((n) => limpiarNombre(n))) };
+}
+
 /* ------------------------------------------------------------------ */
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
@@ -168,6 +177,7 @@ const ACCIONES = {
   "foto-de": accionFotoDe,
   bajar: accionBajar,
   listar: accionListar,
+  eliminar: accionEliminar,
 };
 
 export default async function handler(req, res) {

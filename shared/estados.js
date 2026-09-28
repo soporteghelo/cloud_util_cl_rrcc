@@ -520,10 +520,14 @@ export function renovarFila(opciones) {
       if (!capPrevia) {
         cap = cert.fecha;
         cambio = "NUEVO";
-      } else if (cert.fecha > capPrevia) {
+      } else if (cert.fecha > capPrevia && estadoDe(capPrevia, hoy, umbrales) !== "VIGENTE") {
         cap = cert.fecha;
         cambio = "ACTUALIZADO";
       } else {
+        // Tampoco se pisa una fecha de la hoja que sigue VIGENTE, aunque el
+        // certificado sea mas nuevo: puede ser una correccion a mano, y cada
+        // renovacion la devolvia a la del certificado. Se actualiza sola al
+        // entrar en ACTUALIZAR; antes, la ficha ofrece "USAR" para tomarla.
         // el certificado no es mas nuevo que lo ya registrado: no se pisa
         cambio = "SIN CAMBIO";
       }

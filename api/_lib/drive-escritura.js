@@ -152,6 +152,27 @@ export async function subirArchivo({ nombre, mime, datos, carpetaId, reemplazar 
   return { id: r.id, nombre: r.name, enlace: r.webViewLink || "", reemplazado: Boolean(previo) };
 }
 
+/**
+ * Manda a la papelera de Drive los archivos de `carpetaId` con esos nombres
+ * (no los borra: se pueden recuperar desde la papelera). Devuelve los nombres
+ * que encontro.
+ */
+export async function eliminarDeCarpeta(carpetaId, nombres) {
+  if (!carpetaId) throw new Error("eliminarDeCarpeta: falta la carpeta");
+  const eliminados = [];
+  for (const nombre of nombres) {
+    const archivo = await buscarEnCarpeta(nombre, carpetaId);
+    if (!archivo) continue;
+    await pedirGoogle(`${API}/files/${encodeURIComponent(archivo.id)}?fields=id&${COMUNES}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trashed: true }),
+    });
+    eliminados.push(nombre);
+  }
+  return eliminados;
+}
+
 /* ------------------------------------------------------------------ */
 /* Lectura con la cuenta de servicio                                   */
 /* ------------------------------------------------------------------ */

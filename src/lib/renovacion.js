@@ -74,6 +74,26 @@ export function nombreCarpeta(persona, config = {}) {
 const nombreCertificado = (item) =>
   [item.fecha, item.curso].filter(Boolean).join("_").replace(/[\\/:*?"<>|]+/g, " ").trim() + ".pdf";
 
+/** Nombre con que se sube un PDF de Drive que no es de ningun RRCC (el consolidado de la persona). */
+const nombrePersonal = (item) =>
+  `${item.archivo ? item.archivo.replace(/\.pdf$/i, "") : item.curso}.pdf`.replace(/[\\/:*?"<>|]+/g, " ");
+
+/** Identifica un certificado del inventario. En EIN el id es la posicion de la fila: por eso entra el DNI. */
+export const claveCertificado = (cert) => [cert.origen, cert.id, cert.datosDescarga?.dni || ""].join("|");
+
+/** Origenes del panel lateral de la ficha: van a la carpeta salvo que se quiten con la "x". */
+export const ORIGENES_LATERALES = ["EIN", "INDUCCION"];
+
+/** Nombre con que un certificado del panel lateral se guarda en la carpeta y en el ZIP. */
+export const nombreEnCarpeta = (cert) => (cert.archivo ? nombrePersonal(cert) : nombreCertificado(cert));
+
+/**
+ * Nombres con que ese certificado puede haber quedado en la carpeta de la
+ * persona (como certificado de un RRCC o como PDF suelto de Drive): la "x"
+ * del panel lateral los manda a la papelera.
+ */
+export const nombresEnCarpeta = (cert) => [...new Set([nombreEnCarpeta(cert), nombreCertificado(cert), nombrePersonal(cert)])];
+
 /* ------------------------------------------------------------------ */
 /* Paso 1-4: recalcular y guardar la fila                              */
 /* ------------------------------------------------------------------ */
@@ -158,7 +178,7 @@ export async function renovarPersona(
 
   if (escribir) {
     await sheets(
-      { accion: "guardar", fila: registro.fila, valores: resultado.fila, noMapeados: resultado.noMapeados },
+      { accion: "guardar", fila: registro.fila, valores: resultado.fila, noMapeados: resultado.noMapeados, marca: Date.now() },
       senal
     );
     // el resto de las pestanas repinta sola con esta fila: no hay que recargar
@@ -191,7 +211,10 @@ export async function guardarFilaVerificada({ fila, valores, dni, codigos, datos
   let errorGuardado = null;
   let respuesta = null;
   try {
-    respuesta = await sheets({ accion: "guardar", fila, valores, datos, noMapeados }, senal);
+    // `marca`: Code.gs descarta una escritura mas vieja que llegue despues de
+    // esta (una ejecucion anterior que Google dejo corriendo tras una
+    // respuesta rota), en vez de dejar que revierta lo que se guarda ahora
+    respuesta = await sheets({ accion: "guardar", fila, valores, datos, noMapeados, marca: Date.now() }, senal);
   } catch (e) {
     if (senal?.aborted) throw e;
     errorGuardado = e;
@@ -308,7 +331,7 @@ const certsEnMemoria = new Map();
 const MAX_CERTS_EN_MEMORIA = 80;
 
 export function descargarCertificado(cert, senal) {
-  const clave = [cert.origen, cert.id, cert.datosDescarga?.dni || ""].join("|");
+  const clave = claveCertificado(cert);
   const guardado = certsEnMemoria.get(clave);
   if (guardado) return guardado;
   // sin senal: un pedido compartido no se cancela porque uno de los dos se vaya
@@ -433,6 +456,9 @@ async function enParalelo(lista, n, fn, senal) {
  * subir apenas llega, y el fotocheck y el Word se arman en el navegador en
  * paralelo con todo eso.
  *
+ * `excluidos` = claves (`claveCertificado`) de los certificados que se
+ * quitaron con la "x": no se bajan ni se suben.
+ *
  * `material` = { foto, antiguo } ya pedidos por quien llama (valores o
  * promesas): la vista los adelanta para pintar el fotocheck antes de que
  * termine la descarga de certificados, y aca no se vuelven a pedir.
@@ -440,7 +466,7 @@ async function enParalelo(lista, n, fn, senal) {
 export async function generarSalidas(
   resultado,
   ctx,
-  { log = () => {}, senal, avance = () => {}, antiguoManual = null, material = null } = {}
+  { log = () => {}, senal, avance = () => {}, antiguoManual = null, material = null, excluidos = null } = {}
 ) {
   const persona = resultado.despues;
   const nombre = nombreCarpeta(persona, ctx.config);
@@ -529,13 +555,15 @@ export async function generarSalidas(
 
   /* --- certificados vigentes ---
    * Tanto "A" (autorizados) como "C" (capacitados) suben su PDF si esta
-   * vigente y se puede descargar. Los de origen EIN quedan fuera de la
-   * carpeta de salida a pedido del area.
+   * vigente y se puede descargar.
    *
    * El PDF consolidado de Drive (en `personales`) no es de ningun curso, asi
    * que no entra en la grilla de riesgos, pero es un certificado de la
-   * persona y va en su carpeta igual. La reinduccion (origen INDUCCION)
-   * queda fuera a pedido del area. */
+   * persona y va en su carpeta igual.
+   *
+   * Los certificados de EIN y de INDUCCION (los del panel lateral de la
+   * ficha) van TODOS a la carpeta, esten o no en la grilla: quien no deba ir
+   * se quita con la "x" de ese panel (`excluidos`). */
   const vigentes = resultado.detalle
     .filter(
       (d) => d.estado === "VIGENTE" && d.certificado && d.certificado.descargable && d.certificado.origen !== "EIN"
@@ -547,12 +575,34 @@ export async function generarSalidas(
       codigo: "DRIVE",
       etiqueta: `[${item.origen}]`,
       cert: item,
-      archivo: `${item.archivo ? item.archivo.replace(/\.pdf$/i, "") : item.curso}.pdf`.replace(/[\\/:*?"<>|]+/g, " "),
+      archivo: nombrePersonal(item),
       personal: true,
     }));
-  const tareas = [...vigentes, ...extra];
+  const laterales = (resultado.inventario?.items || [])
+    .filter((item) => item.descargable && ORIGENES_LATERALES.includes(item.origen))
+    .map((item) => ({
+      codigo: item.origen,
+      etiqueta: `[${item.origen}] ${item.curso || ""}`.trim(),
+      cert: item,
+      archivo: nombreEnCarpeta(item),
+      personal: true,
+    }));
+  // uno por certificado (el mismo puede estar en la grilla y en el panel), y
+  // los quitados con la "x" no se suben ni entran al ZIP
+  const vistos = new Set();
+  const tareas = [...vigentes, ...extra, ...laterales].filter((t) => {
+    const clave = claveCertificado(t.cert);
+    if (vistos.has(clave) || excluidos?.has(clave)) return false;
+    vistos.add(clave);
+    return true;
+  });
   total = 1 + tareas.length * 2 + 2;
-  log(`${vigentes.length} certificado(s) vigente(s) para subir${extra.length ? ` + ${extra.length} de Drive` : ""}`);
+  const deLaterales = tareas.filter((t) => laterales.includes(t)).length;
+  log(
+    `${vigentes.length} certificado(s) vigente(s) para subir` +
+      (extra.length ? ` + ${extra.length} de Drive` : "") +
+      (deLaterales ? ` + ${deLaterales} de EIN/inducción` : "")
+  );
 
   const subidas = [];
   const fallo = (t, e) => {
