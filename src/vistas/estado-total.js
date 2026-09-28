@@ -87,6 +87,23 @@ const COLUMNAS_IMAGEN = [
   },
 ];
 
+/**
+ * Encabezados de la tabla de pantalla. Un clic en uno ordena por esa columna
+ * (otro clic invierte); el boton de urgencia vuelve al orden por dias.
+ */
+const COLUMNAS_TABLA = [
+  { campo: "dni", texto: "DNI", valor: (f) => f.persona.dni || "" },
+  { campo: "nombre", texto: "Nombre", valor: (f) => (f.persona.nombreCompleto || "").toUpperCase() },
+  {
+    campo: "cargo",
+    texto: "Cargo / Área",
+    valor: (f) => [f.persona.cargo, f.persona.area].filter(Boolean).join(" · ").toUpperCase(),
+  },
+  { campo: "vencidos", texto: "Vencidos", valor: (f) => f.vencidos.length },
+  { campo: "porVencer", texto: "Por vencer", valor: (f) => f.porVencer.length },
+  { campo: "dias", texto: "Días", valor: (f) => Number(f.persona.dias) || 0 },
+];
+
 const COLUMNAS_DETALLE = [
   { titulo: "APELLIDOS Y NOMBRES", ancho: 34 },
   { titulo: "DNI", ancho: 12 },
@@ -141,6 +158,7 @@ export function montarEstadoTotal() {
   let personas = [];
   let contexto = null;
   let descendente = false;
+  let ordenColumna = null; // { campo, direccion } al hacer clic en un encabezado
   let cargando = false;
   let filas = []; // lo ultimo pintado, para abrir el flotante por indice
 
@@ -230,7 +248,20 @@ export function montarEstadoTotal() {
     }, 0);
   }
 
+  /** Clic en un encabezado: ordena por esa columna; otro clic en la misma la
+      invierte. Los contadores empiezan de mayor a menor (lo que mas interesa). */
+  function ordenarPorEncabezado(th) {
+    const campo = th.dataset.campo;
+    const inicial = campo === "vencidos" || campo === "porVencer" ? -1 : 1;
+    const direccion = ordenColumna?.campo === campo ? -ordenColumna.direccion : inicial;
+    ordenColumna = { campo, direccion };
+    pintar();
+    el.resultados.querySelector(`th[data-campo="${campo}"]`)?.focus();
+  }
+
   function alClicEnFila(ev) {
+    const th = ev.target.closest("th[data-campo]");
+    if (th) return ordenarPorEncabezado(th);
     const fila = ev.target.closest(".et-fila");
     if (!fila) return;
     const item = filas[Number(fila.dataset.indice)];
@@ -238,6 +269,11 @@ export function montarEstadoTotal() {
   }
   function alTecladoEnFila(ev) {
     if (ev.key !== "Enter" && ev.key !== " ") return;
+    const th = ev.target.closest("th[data-campo]");
+    if (th) {
+      ev.preventDefault();
+      return ordenarPorEncabezado(th);
+    }
     const fila = ev.target.closest(".et-fila");
     if (!fila) return;
     ev.preventDefault();
@@ -360,21 +396,41 @@ export function montarEstadoTotal() {
       )
       .map((persona) => ({ persona, ...riesgosProblemaDe(persona, { umbrales }) }));
 
-    filas.sort((a, b) => {
+    const porDias = (a, b) => {
       const da = Number(a.persona.dias) || 0;
       const db = Number(b.persona.dias) || 0;
       return descendente ? db - da : da - db;
-    });
+    };
+    const clave = ordenColumna && COLUMNAS_TABLA.find((c) => c.campo === ordenColumna.campo)?.valor;
+    filas.sort(
+      clave
+        ? (a, b) => {
+            const va = clave(a);
+            const vb = clave(b);
+            const cmp = typeof va === "number" ? va - vb : String(va).localeCompare(String(vb), "es");
+            // a igualdad, desempata la urgencia
+            return cmp * ordenColumna.direccion || porDias(a, b);
+          }
+        : porDias
+    );
 
     const vacio = `<div class="estado-vacio">${
       personas.length ? "nadie coincide con el filtro" : "carga el personal para ver el estado total"
     }</div>`;
 
+    const encabezado = COLUMNAS_TABLA.map(({ campo, texto }) => {
+      const activo = ordenColumna?.campo === campo;
+      const flecha = activo ? (ordenColumna.direccion === 1 ? " ▲" : " ▼") : "";
+      return (
+        `<th data-campo="${campo}" tabindex="0" role="button" aria-label="Ordenar por ${texto}"` +
+        `${activo ? ' class="es-th-activo"' : ""}>${texto}${flecha}</th>`
+      );
+    }).join("");
+
     el.resultados.innerHTML = !filas.length
       ? vacio
-      : `<table class="estado-tabla et-tabla"><thead><tr>` +
-        `<th>DNI</th><th>Nombre</th><th>Cargo / Área</th><th>Vencidos</th><th>Por vencer</th><th>Días</th>` +
-        `</tr></thead><tbody>${filas.map(filaHtml).join("")}</tbody></table>`;
+      : `<table class="estado-tabla et-tabla"><thead><tr>${encabezado}</tr></thead>` +
+        `<tbody>${filas.map(filaHtml).join("")}</tbody></table>`;
 
     const totalVencidos = filas.reduce((n, f) => n + f.vencidos.length, 0);
     const totalPorVencer = filas.reduce((n, f) => n + f.porVencer.length, 0);
@@ -686,6 +742,7 @@ export function montarEstadoTotal() {
   el.buscar.addEventListener("input", pintar);
   el.orden.addEventListener("click", () => {
     descendente = !descendente;
+    ordenColumna = null; // el orden por urgencia vuelve a mandar
     actualizarBotonOrden();
     pintar();
   });

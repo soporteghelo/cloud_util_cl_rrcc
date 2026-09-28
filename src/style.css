@@ -1644,10 +1644,14 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
 /* Encabezados ordenables: clic (o Enter/Espacio, son role=button) reordena
    ese grupo por esa columna. La columna activa se resalta; la flechita de
    direccion ya viene en el texto (ver estado.js). */
-.estado-grupo .estado-tabla th[data-campo] { cursor: pointer; user-select: none; }
+.estado-grupo .estado-tabla th[data-campo],
+.et-tabla th[data-campo] { cursor: pointer; user-select: none; }
 .estado-grupo .estado-tabla th[data-campo]:hover,
-.estado-grupo .estado-tabla th[data-campo]:focus-visible { color: var(--cy); }
-.estado-grupo .estado-tabla th.es-th-activo { color: var(--cy); }
+.estado-grupo .estado-tabla th[data-campo]:focus-visible,
+.et-tabla th[data-campo]:hover,
+.et-tabla th[data-campo]:focus-visible { color: var(--cy); }
+.estado-grupo .estado-tabla th.es-th-activo,
+.et-tabla th.es-th-activo { color: var(--cy); }
 
 /* Fila con el titulo del grupo, oculta en pantalla (ya esta arriba, en
    .estado-grupo-head) y solo visible al imprimir: ver el bloque @media
@@ -1673,6 +1677,24 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 .et-noaplica   .et-badge, .et-badge.et-noaplica   { color: var(--tx-mute); }
 
 /* ---------------- ESTADO TOTAL: dashboard, tabla clicable y flotante ---------------- */
+
+/* El dashboard queda fijo arriba y solo la tabla desplaza; su encabezado se
+   pega al borde superior del scroll para no perder las columnas. */
+.et-body { display: flex; flex-direction: column; overflow: hidden; }
+.et-body .et-dash { flex: none; }
+.et-body #et-resultados { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.et-tabla thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* en movil no hay scroll interno: el encabezado se pega a la ventana */
+@media (max-width: 900px) {
+  .et-body { display: block; overflow: visible; }
+  .et-body #et-resultados { overflow: visible; }
+}
 
 .et-dash {
   display: flex;
