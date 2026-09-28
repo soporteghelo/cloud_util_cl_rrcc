@@ -17,10 +17,54 @@ async function json(ruta, cuerpo, senal) {
     const e = new Error(datos.error || `HTTP ${res.status}`);
     e.estado = res.status;
     e.detalle = datos;
+    // 502 sin JSON (la red de Vercel corto antes) tambien es una demora
+    e.reintentable = Boolean(datos.reintentable) || /respuesta ilegible \(HTTP 50[24]\)/.test(e.message);
     throw e;
   }
   return datos;
 }
+
+/**
+ * Apps Script a veces entrega una pagina de error de Google, el "hello" de
+ * doGet o nada, aunque el script ande (va lento o esta saturado). El puente
+ * ya reintenta dentro de su tiempo; si igual falla, se vuelve a pedir desde
+ * aca un par de veces antes de rendirse: una sola respuesta rota al cargar
+ * CONFIG ya no tumba la renovacion entera.
+ *
+ * Solo para lo que se puede repetir sin riesgo: lecturas y acciones que dan
+ * lo mismo aunque corran dos veces. `guardar` tiene su propia verificacion
+ * (guardarFilaVerificada) y `alta` nunca se repite a ciegas.
+ */
+const REINTENTOS = 2;
+const esperar = (ms, senal) =>
+  new Promise((listo, falla) => {
+    if (senal?.aborted) return falla(new DOMException("abortado", "AbortError"));
+    const t = setTimeout(listo, ms);
+    senal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        falla(new DOMException("abortado", "AbortError"));
+      },
+      { once: true }
+    );
+  });
+
+async function conReintentos(pedido, senal) {
+  for (let intento = 0; ; intento++) {
+    try {
+      return await pedido();
+    } catch (e) {
+      if (senal?.aborted || !e.reintentable || intento >= REINTENTOS) throw e;
+      await esperar(2000 * (intento + 1), senal);
+    }
+  }
+}
+
+/** Acciones de /api/sheets que solo leen: se pueden repetir. */
+const SHEETS_REPETIBLES = new Set(["contexto", "persona", "listado", "cargos", "comprobar"]);
+/** Acciones de /api/sheets que van por el carril urgente (ver `pendientes`). */
+const SHEETS_URGENTES = new Set(["persona", "guardar"]);
 
 /** Inventario de certificados de un DNI. */
 export function buscar(cuerpo, senal) {
@@ -66,19 +110,27 @@ export async function descargar(cuerpo, senal) {
  * Lo que ya esta en el aire no se adelanta ni se cancela: sigue siendo un
  * pedido a la vez, que es lo que Apps Script aguanta.
  */
-const pendientes = { normal: [], fondo: [] };
+/*
+ * Y un tercer carril, el urgente, para lo que tiene a la persona esperando
+ * frente a la pantalla: leer su fila y guardarla. En una renovacion, crear y
+ * vaciar la carpeta de Drive se encola ANTES que el guardado (arranca apenas
+ * se identifica el DNI); sin este carril la ficha quedaba en "guardando..."
+ * detras de esas llamadas, que con Apps Script lento son varios segundos cada
+ * una. Las subidas igual esperan a la carpeta, asi que no pierden nada.
+ */
+const pendientes = { urgente: [], normal: [], fondo: [] };
 let enCurso = false;
 
-function unoALaVez(tarea, fondo = false) {
+function unoALaVez(tarea, carril = "normal") {
   return new Promise((listo, falla) => {
-    pendientes[fondo ? "fondo" : "normal"].push({ tarea, listo, falla });
+    pendientes[carril].push({ tarea, listo, falla });
     bombear();
   });
 }
 
 async function bombear() {
   if (enCurso) return;
-  const siguiente = pendientes.normal.shift() || pendientes.fondo.shift();
+  const siguiente = pendientes.urgente.shift() || pendientes.normal.shift() || pendientes.fondo.shift();
   if (!siguiente) return;
 
   enCurso = true;
@@ -102,7 +154,11 @@ async function bombear() {
  * lo que pida el usuario.
  */
 export function sheets(cuerpo, senal, { fondo = false } = {}) {
-  return unoALaVez(() => json("/api/sheets", cuerpo, senal), fondo);
+  const pedido = () => json("/api/sheets", cuerpo, senal);
+  const accion = String(cuerpo?.accion || "");
+  const repetible = SHEETS_REPETIBLES.has(accion);
+  const carril = SHEETS_URGENTES.has(accion) ? "urgente" : fondo ? "fondo" : "normal";
+  return unoALaVez(() => (repetible ? conReintentos(pedido, senal) : pedido()), carril);
 }
 
 /* ------------------------------------------------------------------ */
@@ -111,7 +167,10 @@ export function sheets(cuerpo, senal, { fondo = false } = {}) {
 
 /** Una accion de /api/drive-output: carpeta | subir | foto | bajar | listar. */
 export function drive(cuerpo, senal) {
-  return unoALaVez(() => json("/api/drive-output", cuerpo, senal));
+  // todas las acciones de Drive dan lo mismo si corren dos veces: `carpeta`
+  // reutiliza la que exista, `subir` reemplaza por nombre, `eliminar` manda a
+  // la papelera lo que haya, y el resto solo lee
+  return unoALaVez(() => conReintentos(() => json("/api/drive-output", cuerpo, senal), senal));
 }
 
 /**

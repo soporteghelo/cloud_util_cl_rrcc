@@ -76,7 +76,14 @@ function esRespuestaFantasma(datos) {
 }
 
 /** Mensaje legible de una respuesta que no es JSON (normalmente una pagina de error de Google). */
-function mensajeDePagina(r, texto) {
+function mensajeDePagina(r, texto, quien = "") {
+  // La pagina "No se encontro la pagina / Drive no pudo abrir el archivo" es
+  // la respuesta rota de siempre cuando el script tarda o esta saturado: su
+  // texto completo (publicidad de Google Drive incluida) no le dice nada a
+  // quien usa la app, asi que se resume.
+  if (/No se encontr[oó] la p[aá]gina|Page Not Found|Sorry, unable to open the file/i.test(texto)) {
+    return `Google respondió "No se encontró la página" en vez de la respuesta de "${quien}": Apps Script está lento o saturado. Vuelve a intentarlo en unos segundos.`;
+  }
   const limpio = texto
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -96,7 +103,7 @@ function mensajeDePagina(r, texto) {
 
 /** Mensaje legible del ultimo intento fallido, haya traido pagina o nada. */
 function mensajeDeFallo({ r, texto, fallo }, quien) {
-  if (r) return mensajeDePagina(r, texto);
+  if (r) return mensajeDePagina(r, texto, quien);
   if (fallo?.name === "TimeoutError" || fallo?.name === "AbortError") {
     return `Apps Script no respondió a tiempo a "${quien}" (${Math.round(presupuesto() / 1000)} s): la hoja está lenta o el script arrancando en frío; vuelve a intentarlo en unos segundos`;
   }

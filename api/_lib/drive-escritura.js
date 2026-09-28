@@ -85,15 +85,58 @@ export async function buscarEnCarpeta(nombre, padreId, mime) {
 }
 
 /**
+ * Carpeta de una persona por el DNI del comienzo de su nombre, con o sin el
+ * cero inicial: "76018787", "76018787_TORRES ..." o "4220334_...". Si hay
+ * varias, gana la que se llama exactamente `nombre`, y si no la modificada
+ * mas recientemente. null si no hay ninguna.
+ */
+async function carpetaDeDni(dni, padre, nombre) {
+  const k = normalizarDocumento(dni);
+  if (!k) return null;
+  const corto = k.replace(/^0+/, "") || k;
+  const candidatas = new Map();
+  for (const x of new Set([k, corto])) {
+    const q = [`name contains '${escapar(x)}'`, `'${escapar(padre)}' in parents`, "trashed = false", `mimeType = '${MIME_CARPETA}'`];
+    const url =
+      `${API}/files?q=${encodeURIComponent(q.join(" and "))}` +
+      `&fields=${encodeURIComponent("files(id,name,modifiedTime)")}&pageSize=50&${COMUNES}`;
+    const datos = await pedirGoogle(url);
+    for (const f of datos?.files || []) {
+      const m = /^(\d+)/.exec(f.name || "");
+      if (m && normalizarDocumento(m[1]) === k) candidatas.set(f.id, f);
+    }
+  }
+  const lista = [...candidatas.values()].sort(
+    (a, b) => (b.name === nombre) - (a.name === nombre) || String(b.modifiedTime).localeCompare(String(a.modifiedTime))
+  );
+  return lista[0] || null;
+}
+
+/**
  * Carpeta de una persona: la reutiliza si ya existe. Importa para poder
  * volver a correr una renovacion sin acabar con tres carpetas iguales.
+ *
+ * Con `dni` se busca por el DNI y no por el nombre exacto: una carpeta vieja
+ * con apellidos ("76018787_TORRES ...") se reutiliza y se renombra a `nombre`.
  */
-export async function carpetaPara(nombre, padreId) {
+export async function carpetaPara(nombre, padreId, dni) {
   const padre = padreId || (await carpetaSalidas());
   if (!padre) {
     throw new Error(
       `no se encontro la carpeta de salidas: define DRIVE_RRCC_FOLDER_ID (y que contenga "${NOMBRE_SALIDAS}") o DRIVE_OUTPUT_FOLDER_ID`
     );
+  }
+
+  const porDni = dni ? await carpetaDeDni(dni, padre, nombre) : null;
+  if (porDni) {
+    if (porDni.name !== nombre) {
+      await pedirGoogle(`${API}/files/${encodeURIComponent(porDni.id)}?fields=id&${COMUNES}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nombre }),
+      });
+    }
+    return { id: porDni.id, nombre, creada: false, renombrada: porDni.name !== nombre ? porDni.name : "" };
   }
 
   const existente = await buscarEnCarpeta(nombre, padre, MIME_CARPETA);

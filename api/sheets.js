@@ -314,6 +314,9 @@ export default async function handler(req, res) {
     const salida = await fn(body);
     res.status(200).json(salida);
   } catch (e) {
-    res.status(502).json({ error: e?.message || String(e) });
+    // `reintentable`: Google entrego una pagina rota, el "hello" de doGet o
+    // nada a tiempo. La accion pudo haber corrido igual; el navegador decide
+    // si repetirla segun sea de lectura o idempotente.
+    res.status(502).json({ error: e?.message || String(e), reintentable: Boolean(e?.ambiguo) });
   }
 }

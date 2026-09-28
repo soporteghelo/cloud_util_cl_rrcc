@@ -264,7 +264,7 @@ vacío. Una fila sin `Cargo` vale como regla general de su `Area`. La
 | `UMBRAL_VENCIDO` | 365 | días desde la capacitación para dar por VENCIDO |
 | `UMBRAL_ACTUALIZAR` | 330 | días para avisar que toca renovar |
 | `A_SIN_CERT` | `MANTENER` | `MANTENER` o `DEGRADAR` (ver más abajo) |
-| `PLANTILLA_CARPETA` | `{DNI}_{APELLIDOS} {NOMBRES}` | nombre de la carpeta por persona |
+| `PLANTILLA_CARPETA` | — | ya no se usa: la carpeta de cada persona se llama solo con su DNI (las viejas con apellidos se reutilizan y se renombran) |
 | `FOTOCHECK_ANCHO_CM` / `FOTOCHECK_ALTO_CM` | 10 / 8 | tamaño del fotocheck en el Word |
 | `ANTIGUO_ANCHO_CM` | 17 | ancho de la foto del fotocheck antiguo (anverso+reverso lado a lado); 17 cm es el ancho completo de la página entre márgenes |
 

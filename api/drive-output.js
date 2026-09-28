@@ -68,10 +68,18 @@ function decodificar(datos) {
 /* Acciones                                                            */
 /* ------------------------------------------------------------------ */
 
-async function accionCarpeta({ nombre, padre }) {
+async function accionCarpeta({ nombre, padre, dni, vaciar }) {
   const limpio = limpiarNombre(nombre);
-  const r = await carpetaPara(limpio, padre || (await carpetaSalidas()));
-  return { ok: true, carpetaId: r.id, nombre: r.nombre, creada: r.creada };
+  const r = await carpetaPara(limpio, padre || (await carpetaSalidas()), dni);
+  const salida = { ok: true, carpetaId: r.id, nombre: r.nombre, creada: r.creada, renombrada: r.renombrada || "" };
+  if (vaciar) {
+    // todo lo que habia va a la papelera, en el mismo pedido
+    const archivos = r.creada ? [] : await listarCarpeta(r.id);
+    const nombres = [...new Set(archivos.filter((a) => a.mimeType !== "application/vnd.google-apps.folder").map((a) => a.name))];
+    salida.eliminados = nombres.length ? (await eliminarDeCarpeta(r.id, nombres)).length : 0;
+    salida.vaciada = true;
+  }
+  return salida;
 }
 
 /** Comprueba que las carpetas de trabajo existan y sean accesibles. */
@@ -230,6 +238,9 @@ export default async function handler(req, res) {
 
     res.status(200).json(await fn(body));
   } catch (e) {
-    res.status(502).json({ error: e?.message || String(e) });
+    // `reintentable`: Google entrego una pagina rota, el "hello" de doGet o
+    // nada a tiempo. La accion pudo haber corrido igual; el navegador decide
+    // si repetirla segun sea de lectura o idempotente.
+    res.status(502).json({ error: e?.message || String(e), reintentable: Boolean(e?.ambiguo) });
   }
 }

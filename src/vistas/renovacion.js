@@ -15,7 +15,7 @@ import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
 import { drive, desdeBase64, blobABase64 } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -86,6 +86,7 @@ export function montarRenovacion() {
     panel: $("rn-panel-res"),
     resultados: $("rn-resultados"),
     resCount: $("rn-res-count"),
+    estadoDrive: $("rn-estado-drive"),
     estadoBase: $("estado-base"),
   };
 
@@ -659,6 +660,113 @@ export function montarRenovacion() {
     temporizadoresSalida.set(dni, t);
   }
 
+  /* ---------------- estado de la carpeta en Drive (arriba de la consola) ---------------- */
+
+  /**
+   * DNIs de esta corrida que van a tener carpeta en Drive pero todavia no la
+   * terminaron de armar (se estan leyendo, o esperan turno). Sin esto, entre
+   * que se pinta la ficha y que arranca la subida el aviso no sabria que
+   * mostrar.
+   */
+  const salidasPendientes = new Set();
+
+  /**
+   * Estado de la carpeta de una persona, deducido de lo que la vista ya lleva
+   * registrado: la barra de progreso de la carpeta, las resubidas en curso o
+   * agendadas tras una edicion, y si quedo algo sin subir.
+   *   guardando -> hay algo subiendose (o por subirse en un instante)
+   *   pendiente -> hay cambios que todavia no estan en Drive
+   *   listo     -> Drive tiene la version que se ve en la ficha
+   *   error     -> la carpeta no se pudo armar
+   * null si la ficha no tiene nada que ver con Drive (consulta, sin salidas).
+   */
+  function estadoDrive(dni, ficha) {
+    if (!ficha?.persona || ficha.consulta) return null;
+    const barra = ficha.progreso?.salida;
+    if (barra) {
+      const pct = barra.total ? Math.min(100, Math.round((barra.hecho / barra.total) * 100)) : 0;
+      return { tipo: "guardando", texto: barra.texto || "armando la carpeta…", pct, eta: etaDe(barra) };
+    }
+    if (sincronizacionesEnCurso.has(dni) || temporizadoresSalida.has(dni)) {
+      return { tipo: "guardando", texto: "guardando los cambios de la ficha…" };
+    }
+    if (ficha.salida?.carpetaId) {
+      if (ficha.salidaDesactualizada) return { tipo: "pendiente", texto: "hay cambios que aún no están en Drive" };
+      return { tipo: "listo", zip: Boolean(ficha.salida.archivos?.length) };
+    }
+    if (ficha.errorSalida) return { tipo: "error", texto: ficha.errorSalida };
+    if (salidasPendientes.has(dni)) return { tipo: "guardando", texto: "leyendo certificados…" };
+    return null;
+  }
+
+  function htmlEstadoDrive() {
+    const filas = [];
+    for (const [dni, ficha] of fichas) {
+      const e = estadoDrive(dni, ficha);
+      if (!e) continue;
+      const quien =
+        `<span class="ed-dni">${escaparHtml(dni)}</span>` +
+        `<span class="ed-nombre">${escaparHtml(ficha.persona.nombreCompleto || "")}</span>`;
+      let titulo = "";
+      let detalle = "";
+      let accion = "";
+      if (e.tipo === "guardando") {
+        titulo = "GUARDANDO EN DRIVE";
+        detalle =
+          escaparHtml(e.texto) +
+          (e.pct !== undefined ? ` · <b>${e.pct}%</b>` : "") +
+          (e.eta ? ` · ${escaparHtml(e.eta)}` : "");
+      } else if (e.tipo === "pendiente") {
+        titulo = "CAMBIOS SIN GUARDAR";
+        detalle = `${escaparHtml(e.texto)} · se guardan al abrir, compartir o descargar la carpeta`;
+      } else if (e.tipo === "error") {
+        titulo = "NO SE PUDO GUARDAR";
+        detalle = escaparHtml(e.texto);
+      } else {
+        titulo = "GUARDADO EN DRIVE";
+        detalle = e.zip ? "ZIP listo para descargar" : "el ZIP se arma desde la carpeta de Drive";
+        accion = `<button type="button" class="btn btn-sm ed-zip" data-ed-zip="${escaparHtml(dni)}">DESCARGAR ZIP</button>`;
+      }
+      const icono = e.tipo === "guardando" ? `<i class="ed-spin" aria-hidden="true"></i>` : `<i class="ed-icono" aria-hidden="true"></i>`;
+      filas.push(
+        `<div class="ed ed-${e.tipo}" role="status">${icono}` +
+          `<div class="ed-txt"><div class="ed-titulo">${titulo}</div><div class="ed-quien">${quien}</div>` +
+          `<div class="ed-detalle">${detalle}</div></div>${accion}` +
+          (e.tipo === "guardando" ? `<div class="ed-onda" aria-hidden="true"></div>` : "") +
+          `</div>`
+      );
+    }
+    return filas.join("");
+  }
+
+  let ultimoEstadoDrive = "";
+  /** Repinta el aviso solo si cambio algo: asi la animacion no se reinicia a cada vuelta. */
+  function pintarEstadoDrive() {
+    if (!el.estadoDrive) return;
+    const html = htmlEstadoDrive();
+    if (html === ultimoEstadoDrive) return;
+    ultimoEstadoDrive = html;
+    el.estadoDrive.innerHTML = html;
+    el.estadoDrive.hidden = !html;
+  }
+  // El estado sale de varios lugares (renovacion, ediciones, "x", ZIP...):
+  // en vez de avisar desde cada uno, se revisa seguido. Es barato: son unas
+  // pocas fichas y solo toca el DOM si algo cambio.
+  setInterval(pintarEstadoDrive, 400);
+
+  el.estadoDrive?.addEventListener("click", async (ev) => {
+    const boton = ev.target.closest("[data-ed-zip]");
+    if (!boton) return;
+    marcarOcupado(boton, true);
+    try {
+      await descargarCarpetaUsuario(boton.dataset.edZip);
+    } catch (e) {
+      notificar("No se pudo descargar la carpeta", e.message, "warn");
+    } finally {
+      marcarOcupado(boton, false);
+    }
+  });
+
   /* ---------------- progreso con tiempo restante ---------------- */
 
   const TITULO_PROGRESO = { salida: "CARPETA EN DRIVE", zip: "DESCARGA ZIP" };
@@ -927,7 +1035,7 @@ export function montarRenovacion() {
     const card = el.resultados.querySelector(`[data-dni="${dni}"]`) || el.resultados;
     card.querySelectorAll(`[data-cert-clave="${CSS.escape(clave)}"]`).forEach((fila) => {
       fila.classList.toggle("excluido", fuera);
-      const x = fila.querySelector("[data-cert-x]");
+      const x = fila.querySelector("[data-cert-x], [data-cert-x-rrcc]");
       if (!x) return;
       x.textContent = fuera ? "↺" : "×";
       x.title = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
@@ -1172,13 +1280,26 @@ export function montarRenovacion() {
         const contenidoCert =
           `<small>CERTIFICADO · VIGENCIA</small><b>${aFormatoCorto(venceCert) || "sin fecha"}</b>` +
           `<em>curso ${aFormatoCorto(cert?.fecha) || "sin fecha"} · ${escaparHtml(cert?.origen)}</em>`;
-        const certificado = datos.cargando
+        const bloqueCert = datos.cargando
           ? `<span class="rc-cert cargando">BUSCANDO CERTIFICADO…</span>`
           : !cert
           ? `<span class="rc-cert falta">SIN CERTIFICADO</span>`
           : cert.descargable
             ? `<button type="button" class="rc-fecha cert-fecha" data-abrir-cert="${r.codigo}" title="Abrir el certificado (PDF) · ${escaparHtml(cert.curso)} · ${escaparHtml(cert.origen)}">${contenidoCert}</button>`
             : `<span class="rc-fecha cert-fecha" title="${escaparHtml(cert.curso)} · ${escaparHtml(cert.origen)}">${contenidoCert}</span>`;
+        // La "x" de la tarjeta: saca este PDF de la carpeta de Drive y del ZIP,
+        // igual que la del panel lateral. Comparten la clave del certificado,
+        // asi que quitarlo en un lado lo muestra quitado en el otro. Solo
+        // cambia lo que se sube: la fecha y la "A" de la hoja no se tocan.
+        let certificado = bloqueCert;
+        if (!datos.cargando && cert?.descargable) {
+          const clave = claveCertificado(cert);
+          const fuera = excluidos.get(dni)?.has(clave);
+          const tituloX = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
+          certificado =
+            `<div class="cert-fila rc-cert-fila${fuera ? " excluido" : ""}" data-cert-clave="${escaparHtml(clave)}">${bloqueCert}` +
+            `<button type="button" class="cert-x" data-cert-x-rrcc="${r.codigo}" title="${tituloX}" aria-label="${tituloX}">${fuera ? "↺" : "×"}</button></div>`;
+        }
 
         const opciones = ["", "A", "C"];
         if (tipo && !opciones.includes(tipo)) opciones.push(tipo);
@@ -1412,6 +1533,11 @@ export function montarRenovacion() {
     card.querySelectorAll("[data-cert-x]").forEach((boton) => {
       boton.addEventListener("click", () =>
         alternarExcluido(dni, fichas.get(dni)?.inventario?.[Number(boton.dataset.certX)], boton)
+      );
+    });
+    card.querySelectorAll("[data-cert-x-rrcc]").forEach((boton) => {
+      boton.addEventListener("click", () =>
+        alternarExcluido(dni, fichas.get(dni)?.detalle?.find((d) => d.codigo === boton.dataset.certXRrcc)?.certificado, boton)
       );
     });
     card.querySelectorAll("[data-abrir-cert]").forEach((boton) => {
@@ -1795,6 +1921,7 @@ export function montarRenovacion() {
         if (senal.aborted) break;
         barra.set(hechas, lista.length, `${obj.dni} · leyendo`);
         consola.cabecera(`[${i + 1}/${lista.length}] DNI ${obj.dni}`);
+        if (!soloConsulta && el.salidas.checked) salidasPendientes.add(obj.dni);
         const inventario = inventarioDe(i);
 
         try {
@@ -1841,7 +1968,14 @@ export function montarRenovacion() {
           });
           // Etapa 1: la fila de la hoja ya se leyo. Se pinta la ficha con sus
           // datos y fechas (solo para mirar) mientras llegan los certificados.
+          let carpeta = null;
           const alLeer = (p, registro) => {
+            // DNI identificado: su carpeta de Drive se vacia ya, para que al
+            // terminar tenga solo lo que suba esta renovacion
+            if (!soloConsulta && el.salidas.checked) {
+              const logCarpeta = lista.length > 1 ? (m, t) => consola(`[${obj.dni}] ${m}`, t) : consola;
+              carpeta = vaciarCarpeta(p, contexto, { log: logCarpeta, senal });
+            }
             if (!antiguoManual && p.fotocheckAntiguoDriveId) {
               antiguoP = fotoAntigua(p.fotocheckAntiguoDriveId, senal).catch(() => null);
             }
@@ -1889,6 +2023,7 @@ export function montarRenovacion() {
 
           if (r.estado === "nuevo") {
             nuevos.push(obj.dni);
+            salidasPendientes.delete(obj.dni);
             pintarFicha(obj.dni, { error: "no está en la base — usa la pestaña NUEVO PERSONAL" });
             hechas++;
             continue;
@@ -1938,6 +2073,7 @@ export function montarRenovacion() {
             await salidaEnCurso;
             if (senal.aborted) {
               mostrarProgreso(dni, "salida", null);
+              salidasPendientes.delete(dni);
               break;
             }
             const varias = lista.length > 1;
@@ -1956,9 +2092,12 @@ export function montarRenovacion() {
               },
               antiguoManual,
               material: { foto: ficha.foto, antiguo: antiguoP },
+              carpeta,
             })
               .then(
                 (salida) => {
+                  salidasPendientes.delete(dni);
+                  delete ficha.errorSalida;
                   ficha.salida = salida;
                   if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
                   conSalida++;
@@ -1967,14 +2106,17 @@ export function montarRenovacion() {
                   el.resCount.textContent = `${hechas}/${lista.length} · ${conSalida} con salidas`;
                 },
                 (e) => {
+                  salidasPendientes.delete(dni);
                   mostrarProgreso(dni, "salida", null);
                   if (senal.aborted) return;
+                  ficha.errorSalida = e.message;
                   fallos++;
                   logSalida(`no se pudo generar la carpeta: ${e.message}`, "err");
                 }
               );
           }
         } catch (e) {
+          salidasPendientes.delete(obj.dni);
           if (senal.aborted) break;
           fallos++;
           consola(`  ${e.message}`, "err");
@@ -2016,6 +2158,7 @@ export function montarRenovacion() {
       consola(`la corrida se detuvo: ${e.message}`, "err");
       notificar("Renovación interrumpida", e.message, "warn");
     } finally {
+      salidasPendientes.clear();
       corriendo = false;
       el.run.disabled = false;
       el.stop.hidden = true;

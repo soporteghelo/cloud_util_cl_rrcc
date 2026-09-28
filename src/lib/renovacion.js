@@ -16,7 +16,7 @@
 
 import { buscar, descargar, sheets, drive, driveDirecto, aBase64, desdeBase64, blobABase64 } from "./api.js";
 import { obtenerContexto, obtenerPersonal, obtenerPersona, anotarPersona } from "./datos.js";
-import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila } from "../../shared/estados.js";
+import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila, normalizarDocumento } from "../../shared/estados.js";
 import { fotocheckPng } from "./fotocheck.js";
 import { armarAutorizacion, medirImagen } from "./docx.js";
 
@@ -56,19 +56,17 @@ export function listarPersonal(senal, filtro) {
 }
 
 /**
- * Nombre de la carpeta de la persona. La plantilla vive en CONFIG para no
- * tener que tocar codigo si manana la quieren con el DNI delante.
+ * Nombre de la carpeta de la persona: SOLO su DNI (8 digitos).
+ *
+ * Antes era "{DNI}_{APELLIDOS} {NOMBRES}" (PLANTILLA_CARPETA en CONFIG), y
+ * bastaba con corregir una letra del nombre para que la siguiente renovacion
+ * creara otra carpeta de la misma persona. El DNI no cambia. Las carpetas
+ * viejas con nombre se reutilizan igual: el backend las busca por el DNI del
+ * comienzo y las renombra (ver `carpeta` con `dni`). PLANTILLA_CARPETA ya no
+ * se usa.
  */
-export function nombreCarpeta(persona, config = {}) {
-  const plantilla = config.PLANTILLA_CARPETA || "{DNI}_{APELLIDOS} {NOMBRES}";
-  return plantilla
-    .replace(/\{APELLIDOS\}/gi, persona.apellidos || "")
-    .replace(/\{NOMBRES\}/gi, persona.nombres || "")
-    .replace(/\{NOMBRE\}/gi, persona.nombreCompleto || "")
-    .replace(/\{DNI\}/gi, persona.dni || "")
-    .replace(/\{CODIGO\}/gi, persona.codigo || "")
-    .replace(/\s+/g, " ")
-    .trim();
+export function nombreCarpeta(persona) {
+  return normalizarDocumento(persona.dni) || String(persona.dni || "").trim();
 }
 
 const nombreCertificado = (item) =>
@@ -462,21 +460,32 @@ async function enParalelo(lista, n, fn, senal) {
  * `material` = { foto, antiguo } ya pedidos por quien llama (valores o
  * promesas): la vista los adelanta para pintar el fotocheck antes de que
  * termine la descarga de certificados, y aca no se vuelven a pedir.
+ *
+ * `carpeta` = lo que devolvio `vaciarCarpeta` al identificar a la persona:
+ * la carpeta ya existe y esta vacia, asi que no se vuelve a pedir ni hay que
+ * limpiarla al final. Si no vino (o el vaciado fallo), se crea aca y la
+ * limpieza se hace al terminar, como antes.
  */
 export async function generarSalidas(
   resultado,
   ctx,
-  { log = () => {}, senal, avance = () => {}, antiguoManual = null, material = null, excluidos = null } = {}
+  { log = () => {}, senal, avance = () => {}, antiguoManual = null, material = null, excluidos = null, carpeta = null } = {}
 ) {
   const persona = resultado.despues;
   const nombre = nombreCarpeta(persona, ctx.config);
 
-  log(`carpeta de Drive "${nombre}"...`);
-  const carpetaP = drive({ accion: "carpeta", nombre }, senal);
-  carpetaP.then(
-    (c) => log(c.creada ? `carpeta creada` : `carpeta ya existia, se actualiza`, "ok"),
-    () => {}
-  );
+  const crear = () => {
+    log(`carpeta de Drive "${nombre}"...`);
+    const p = drive({ accion: "carpeta", nombre, dni: persona.dni }, senal);
+    p.then(
+      (c) => log(textoCarpeta(c), "ok"),
+      () => {}
+    );
+    return p;
+  };
+  // la vaciada al identificar a la persona sirve solo si es la misma carpeta
+  // (si se corrigio el nombre en el camino, la carpeta es otra)
+  const carpetaP = carpeta && carpeta.nombre === nombre ? carpeta.promesa.catch(crear) : crear();
   const subir = colaDeSubida(carpetaP, senal);
 
   const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [], archivos: [] };
@@ -657,8 +666,75 @@ export async function generarSalidas(
   salida.carpetaId = (await carpetaP).carpetaId;
   await documentosP;
 
-  await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFotocheck, nombreWord], { log, senal });
+  if (!(await carpetaP).vaciada) {
+    await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFotocheck, nombreWord], { log, senal });
+  }
   return salida;
+}
+
+/**
+ * Apenas se identifica a la persona (se leyo su fila), su carpeta de Drive se
+ * crea si no existe y se VACIA: todo lo que tenia va a la papelera (se puede
+ * recuperar desde Drive), para que al terminar quede solo lo que suba esta
+ * renovacion.
+ *
+ * Se hace mientras se consultan JOMISER, EIN y Drive, que no pasan por Apps
+ * Script: la fila de Apps Script esta libre en ese momento, asi que no le
+ * suma tiempo a la renovacion. Las subidas esperan a que termine, para que
+ * el vaciado no se lleve un archivo recien subido con el mismo nombre.
+ *
+ * Devuelve { nombre, promesa } para pasarlo a `generarSalidas`. La promesa
+ * trae la carpeta con `vaciada: true` si se pudo vaciar; si fallo solo el
+ * vaciado, `vaciada: false` y `generarSalidas` limpia al final.
+ */
+/** Lo que se informa en la consola sobre la carpeta de la persona. */
+function textoCarpeta(c) {
+  if (c.creada) return "carpeta creada";
+  if (c.renombrada) return `carpeta existente reutilizada (antes "${c.renombrada}")`;
+  return "carpeta ya existia, se actualiza";
+}
+
+export function vaciarCarpeta(persona, ctx, { log = () => {}, senal } = {}) {
+  const nombre = nombreCarpeta(persona, ctx.config);
+  const promesa = (async () => {
+    log(`carpeta de Drive "${nombre}"...`);
+    // `vaciar`: el Code.gs nuevo manda todo a la papelera en la misma
+    // ejecucion (1 llamada a Apps Script en vez de 3). Uno viejo ignora el
+    // pedido y no devuelve `vaciada`: entonces se lista y se borra desde aca.
+    const c = await drive({ accion: "carpeta", nombre, dni: persona.dni, vaciar: true }, senal);
+    if (c.creada) {
+      log(textoCarpeta(c), "ok");
+      return { ...c, vaciada: true };
+    }
+    if (typeof c.vaciada === "boolean") {
+      log(
+        c.eliminados
+          ? `${textoCarpeta(c)} · vaciada: ${c.eliminados} archivo(s) anteriores a la papelera`
+          : `${textoCarpeta(c)} · estaba vacia`,
+        "ok"
+      );
+      return c;
+    }
+    try {
+      const { archivos = [] } = await drive({ accion: "listar", carpetaId: c.carpetaId }, senal);
+      const nombres = [
+        ...new Set(archivos.filter((a) => a.mimeType !== "application/vnd.google-apps.folder").map((a) => a.name)),
+      ];
+      if (nombres.length) {
+        await drive({ accion: "eliminar", carpetaId: c.carpetaId, nombres }, senal);
+        log(`carpeta vaciada: ${nombres.length} archivo(s) anteriores a la papelera`, "ok");
+      } else {
+        log("carpeta ya existia, estaba vacia", "ok");
+      }
+      return { ...c, vaciada: true };
+    } catch (e) {
+      if (senal?.aborted) throw e;
+      log(`  no se pudo vaciar la carpeta (se limpiara al terminar): ${e.message}`, "warn");
+      return { ...c, vaciada: false };
+    }
+  })();
+  promesa.catch(() => {});
+  return { nombre, promesa };
 }
 
 /** Espacios repetidos y bordes fuera: la cuenta de servicio limpia asi los nombres al subir. */
