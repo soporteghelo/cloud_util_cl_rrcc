@@ -13,9 +13,9 @@ import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTex
 import { montarPdf } from "./visor-pdf.js";
 import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
-import { drive, desdeBase64, blobABase64 } from "../lib/api.js";
+import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -29,7 +29,7 @@ import {
   admiteAplicarC,
   leerFila,
 } from "../../shared/estados.js";
-import { colTipo, INDICE } from "../../shared/rrcc.js";
+import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 import { armarAutorizacion } from "../lib/docx.js";
 import { fotocheckImagen, nombreFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
@@ -978,20 +978,11 @@ export function montarRenovacion() {
     const tarea = (async () => {
       try {
         const docs = await documentosActuales(ficha);
-        const fotocheckSubido = await drive({
-          accion: "subir",
-          carpetaId: folderId,
-          nombre: docs.nombreFotocheck,
-          mime: docs.mimeFotocheck,
-          datos: await blobABase64(docs.pngBlob),
-        });
-        const wordSubido = await drive({
-          accion: "subir",
-          carpetaId: folderId,
-          nombre: docs.nombreWord,
-          mime: MIME_DOCX,
-          datos: await blobABase64(docs.docx),
-        });
+        // los dos en una sola llamada a Apps Script (subir-lote)
+        const [fotocheckSubido, wordSubido] = await subirArchivos(folderId, [
+          { nombre: docs.nombreFotocheck, mime: docs.mimeFotocheck, datos: await blobABase64(docs.pngBlob) },
+          { nombre: docs.nombreWord, mime: MIME_DOCX, datos: await blobABase64(docs.docx) },
+        ]);
 
         // si se corrigio el nombre, el fotocheck y el Word del nombre anterior
         // quedarian duplicados en la carpeta: van a la papelera
@@ -1286,7 +1277,15 @@ export function montarRenovacion() {
   }
 
   const textoEstadoFicha = (datos) =>
-    datos.cargando ? "cargando…" : datos.guardando ? "guardando…" : datos.consulta ? "consulta" : "renovado";
+    datos.cargando
+      ? "cargando…"
+      : datos.guardando
+        ? "guardando…"
+        : datos.consulta
+          ? "consulta"
+          : datos.sinGuardar
+            ? "sin guardar en la hoja"
+            : "renovado";
 
   /** La foto de la persona en la cabecera de la ficha. Puede ser un data URL
       (Drive) o el archivo elegido a mano; del archivo se crea una URL una sola
@@ -1420,13 +1419,14 @@ export function montarRenovacion() {
         ? items.map((it, i) => {
             const indice = inventario.indexOf(it);
             const estado = it.descargable ? "ABRIR PDF" : "SIN CERTIFICADO";
+            const fecha = aFormatoCorto(it.fecha) || (origen === "INDUCCION" ? "" : "sin fecha");
             const clave = claveCertificado(it);
             const fuera = excluidos.get(dni)?.has(clave);
             const tituloX = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
             // la "x" va aparte del boton que abre el PDF: un <button> no puede ir dentro de otro
             return `<div class="cert-fila${fuera ? " excluido" : ""}" data-cert-clave="${escaparHtml(clave)}">` +
               `<button class="cert-item${it.descargable ? "" : " disabled"}" data-cert="${indice}" ${it.descargable ? "" : "disabled"} title="${escaparHtml(it.archivo || it.curso || "")}">` +
-              `<b>${escaparHtml(it.curso || "Certificado")}</b><span>${[aFormatoCorto(it.fecha) || (origen === "INDUCCION" ? "" : "sin fecha"), estado].filter(Boolean).join(" · ")}</span></button>` +
+              `<b>${escaparHtml(it.curso || "Certificado")}</b><span>${fecha ? `<time class="cert-dia">${fecha}</time> · ` : ""}${estado}</span></button>` +
               `<button type="button" class="cert-x" data-cert-x="${indice}" title="${tituloX}" aria-label="${tituloX}">${fuera ? "↺" : "×"}</button></div>`;
           }).join("")
         : `<div class="cert-vacio">No se encontraron certificados de ${vacio}.</div>`;
@@ -1465,7 +1465,10 @@ export function montarRenovacion() {
       `<div class="card-id"><span class="card-foto${datos.fotoResuelta || datos.foto ? "" : " card-foto-cargando"}" data-foto-persona title="Foto de la persona (carpeta FOTOS)"></span>` +
       `<span class="card-dni">${persona.dni}</span>` +
       `<span class="item-meta">${persona.codigo || ""}</span>` +
-      `<span class="card-n" data-card-n>${textoEstadoFicha(datos)}</span>` +
+      `<span class="card-n${datos.sinGuardar ? " card-n-error" : ""}" data-card-n>${textoEstadoFicha(datos)}</span>` +
+      (datos.sinGuardar && !datos.consulta
+        ? `<button type="button" class="btn btn-warn btn-sm" data-reintentar-guardado="${dni}" title="La hoja no recibió esta renovación (${escaparHtml(datos.sinGuardar.error)}). Lo calculado sigue en pantalla: toca para volver a guardarlo">SIN GUARDAR · REINTENTAR</button>`
+        : "") +
       `<label class="campo-ficha campo-emo${datosEdit.emoVenc !== undefined ? " editado" : ""}" title="Vencimiento del examen médico (EMO). Se imprime en el fotocheck y se puede corregir aquí"><span>EMO VENCE</span>` +
       `<input type="date" data-emo-venc value="${persona.vencimientoEmo || ""}" aria-label="Vencimiento del EMO" /></label>` +
       `<label class="campo-ficha campo-area${datosEdit.area !== undefined ? " editado" : ""}" title="Área de la planilla. Se imprime en el fotocheck y se puede corregir aquí"><span>ÁREA</span>` +
@@ -1506,6 +1509,13 @@ export function montarRenovacion() {
     pintarFoto(card, datos);
 
     card.querySelector("[data-fotocheck]")?.addEventListener("click", () => alternarFotocheck(dni));
+    card.querySelector("[data-reintentar-guardado]")?.addEventListener("click", async () => {
+      if (await reintentarGuardado(dni)) {
+        notificar("Guardado en la hoja", `${dni} · fila ${fichas.get(dni)?.fila}`, "ok");
+      } else {
+        notificar("No se pudo guardar", fichas.get(dni)?.sinGuardar?.error || "vuelve a intentarlo en unos segundos", "warn");
+      }
+    });
     card.querySelector("[data-agregar-foto]")?.addEventListener("click", () => agregarFotoPersona(dni));
     card.querySelector("[data-antiguo-anverso]")?.addEventListener("click", () => elegirLadoAntiguo(dni, "anverso"));
     card.querySelector("[data-antiguo-reverso]")?.addEventListener("click", () => elegirLadoAntiguo(dni, "reverso"));
@@ -1728,6 +1738,45 @@ export function montarRenovacion() {
     }
   }
 
+  /**
+   * Vuelve a guardar una renovacion cuya fila no llego a la hoja (Apps Script
+   * saturado). Se escribe `ficha.valores`, que es lo calculado: las
+   * correcciones a mano que aun no se guardaron siguen como cambios pendientes.
+   * Devuelve true si la hoja ya lo tiene.
+   */
+  async function reintentarGuardado(dni, { senal } = {}) {
+    const ficha = fichas.get(dni);
+    if (!ficha?.sinGuardar) return true;
+    if (!ficha.fila || !Array.isArray(ficha.valores) || !ficha.persona?.dni) return false;
+    const card = el.resultados.querySelector(`[data-dni="${dni}"]`);
+    const boton = card?.querySelector("[data-reintentar-guardado]");
+    if (boton) boton.disabled = true;
+    ficha.guardando = true;
+    const n = card?.querySelector("[data-card-n]");
+    if (n) n.textContent = textoEstadoFicha(ficha);
+    try {
+      await guardarFilaVerificada({
+        fila: ficha.fila,
+        valores: ficha.valores,
+        dni: ficha.persona.dni,
+        codigos: CODIGOS_RRCC,
+        senal,
+        releer: "si-falla",
+      });
+      ficha.sinGuardar = null;
+      consola(`[${dni}] fila guardada en la hoja`, "ok");
+      return true;
+    } catch (e) {
+      if (senal?.aborted) return false; // abortado: sigue sin guardar
+      ficha.sinGuardar = { error: e.message };
+      consola(`[${dni}] la fila sigue sin guardarse en la hoja: ${e.message}`, "err");
+      return false;
+    } finally {
+      ficha.guardando = false;
+      if (fichas.get(dni) === ficha) pintarFicha(dni, ficha);
+    }
+  }
+
   /** Escribe en la hoja lo corregido a mano y deja la ficha con la fila nueva. */
   async function guardarEdiciones(dni, card) {
     const ficha = fichas.get(dni);
@@ -1772,6 +1821,7 @@ export function montarRenovacion() {
       });
       ficha.valores = guardado.valores;
       ficha.persona = leerFila(guardado.valores);
+      ficha.sinGuardar = null; // se escribio la fila entera: la renovacion tambien quedo
       ficha.detalle = r.detalle;
       ficha.alertas = r.alertas;
       ficha.resumen = resumenAutorizaciones(r.detalle);
@@ -1817,6 +1867,7 @@ export function montarRenovacion() {
       const guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos: elegidas });
       ficha.valores = guardado.valores;
       ficha.persona = leerFila(guardado.valores);
+      ficha.sinGuardar = null; // se escribio la fila entera: la renovacion tambien quedo
       ficha.seleccion = new Set();
       ficha.salidaDesactualizada = true;
       fichas.set(dni, ficha);
@@ -1969,7 +2020,304 @@ export function montarRenovacion() {
     let conSalida = 0;
     let fallos = 0;
     const nuevos = [];
-    let salidaEnCurso = Promise.resolve();
+
+    /* Con varios DNI la corrida va en dos etapas:
+         1. FICHAS: por cada persona se lee su fila, se cruzan sus certificados,
+            se pintan las fechas y se guarda. Es lo que se espera ver primero.
+         2. CARPETAS: recien con todas las fichas en pantalla se arma la
+            carpeta de Drive de cada una (vaciar, foto, subidas).
+       Mientras dura la etapa 1 el carril de fondo de la cola de Apps Script
+       queda retenido: una subida de varios MB en el aire dejaba el guardado de
+       la persona siguiente esperando hasta agotar el tiempo, y esa persona se
+       perdia. Con un solo DNI no hay a quien darle prioridad: su carpeta se
+       prepara mientras se buscan sus certificados, como siempre. */
+    const varias = lista.length > 1;
+    const conSalidas = !soloConsulta && el.salidas.checked;
+    const soltarFondo = varias ? retenerFondo() : () => {};
+    const porArmar = []; // etapa 2, en orden
+    const conError = []; // DNIs que fallaron en la etapa 1: se reintentan una vez al final de ella
+    const sinGuardar = []; // fichas calculadas cuya fila no se pudo guardar: se reintenta al final
+    const sinFoto = []; // la lectura publica no tenia su foto: se le pide a Apps Script en la etapa 2
+
+    const contar = () => {
+      el.resCount.textContent =
+        `${hechas}/${lista.length}` + (soloConsulta ? " consultada(s)" : ` · ${conSalida} con salidas`);
+    };
+
+    /** Etapa 1 de una persona. Devuelve "ok" | "nuevo" | "error" | "abortado". */
+    async function procesar(obj, { inventario = null, reintento = false } = {}) {
+      barra.set(hechas, lista.length, `${obj.dni} · leyendo`);
+      if (conSalidas) salidasPendientes.add(obj.dni);
+
+      try {
+        // el fotocheck antiguo adjuntado a mano (botones de la ficha) no viene
+        // de esta corrida: se rescata de la ficha anterior para no perderlo,
+        // anverso y reverso por separado (por si luego se reemplaza uno solo).
+        const anterior = fichas.get(obj.dni);
+        const antiguoManual = anterior?.antiguoManual || null;
+        const antiguoAnversoFile = anterior?.antiguoAnversoFile || null;
+        const antiguoReversoFile = anterior?.antiguoReversoFile || null;
+        // igual que el antiguo: si la foto se agrego a mano y la subida a
+        // FOTOS fallo (o Drive todavia no la indexa), no se pierde al
+        // volver a correr la lista.
+        const fotoManual = anterior?.fotoManual || null;
+
+        // La foto solo necesita el DNI: se pide YA, en paralelo con la hoja y
+        // el inventario de certificados, para que el fotocheck se vea con su
+        // foto apenas se pinta la ficha y no al final de las subidas. En un
+        // lote solo la lectura publica (no hace fila detras de Apps Script);
+        // la consulta a Apps Script, que es lenta, queda para la etapa 2.
+        const fotoP = fotoDeDni(obj.dni, senal, { soloPublica: varias }).catch(() => null);
+        // la foto se pinta en cuanto llega, en la ficha que haya en ese
+        // momento (la preliminar o la completa)
+        fotoP.then((foto) => {
+          const actual = fichas.get(obj.dni);
+          if (!foto || !actual?.persona || actual.foto) return;
+          actual.foto = foto;
+          pintarFoto(el.resultados.querySelector(`[data-dni="${obj.dni}"]`), actual);
+          refrescarFotocheck(obj.dni);
+        });
+        let antiguoP = null;
+        const comunes = () => ({
+          ediciones: {},
+          datosEdit: {},
+          seleccion: new Set(),
+          consulta: soloConsulta,
+          antiguoManual,
+          antiguoAnversoFile,
+          antiguoReversoFile,
+          antiguo: antiguoManual,
+          fotoManual,
+          foto: fichas.get(obj.dni)?.foto || null,
+        });
+        // Etapa 1: la fila de la hoja ya se leyo. Se pinta la ficha con sus
+        // datos y fechas (solo para mirar) mientras llegan los certificados.
+        let carpeta = null;
+        const alLeer = (p, registro) => {
+          // Un solo DNI: su carpeta de Drive se vacia ya, para que al terminar
+          // tenga solo lo que suba esta renovacion. En un lote eso lo hace la
+          // etapa 2, para no quitarle el turno a las fichas.
+          if (conSalidas && !varias) carpeta = vaciarCarpeta(p, contexto, { log: consola, senal });
+          // el fotocheck antiguo depende de la fila: la lectura publica sale
+          // ya; si hay que pedirselo a Apps Script, en un lote espera a la etapa 2
+          if (!antiguoManual && p.fotocheckAntiguoDriveId) {
+            antiguoP = fotoAntigua(p.fotocheckAntiguoDriveId, senal, { fondo: varias }).catch(() => null);
+          }
+          if (!registro?.valores) return;
+          pintarFicha(obj.dni, {
+            ...comunes(),
+            persona: p,
+            detalle: [],
+            alertas: [],
+            inventario: [],
+            fila: registro.fila,
+            valores: registro.valores,
+            cargando: true,
+          });
+        };
+        // Etapa 2: certificados cruzados con la hoja. Se pinta la ficha
+        // completa sin esperar a que la escritura termine de hacer fila en
+        // Apps Script; la cabecera dice "guardando…" hasta que confirme.
+        let ficha = null;
+        const alCalcular = (parcial) => {
+          ficha = {
+            ...comunes(),
+            persona: parcial.despues,
+            detalle: parcial.detalle,
+            alertas: parcial.alertas,
+            resumen: soloConsulta ? resumenAutorizaciones(parcial.detalle) : undefined,
+            inventario: parcial.inventario?.items || [],
+            fila: parcial.fila,
+            valores: parcial.enHoja,
+            guardando: !soloConsulta && el.escribir.checked,
+          };
+          pintarFicha(obj.dni, ficha);
+        };
+
+        let r;
+        let errorGuardado = null;
+        try {
+          r = soloConsulta
+            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer, alCalcular, inventario })
+            : await renovarPersona(obj.dni, contexto, {
+                log: consola,
+                senal,
+                escribir: el.escribir.checked,
+                alLeer,
+                alCalcular,
+                inventario,
+                // en un lote la lista no se frena reintentando: si falla, la
+                // ficha queda "sin guardar" y se vuelve a guardar al final
+                reintentosGuardado: varias ? 0 : undefined,
+              });
+        } catch (e) {
+          // La fila no se pudo guardar, pero la renovacion esta calculada: la
+          // ficha se queda en pantalla con lo calculado (antes se perdia y se
+          // saltaba al DNI siguiente) y el guardado se reintenta al final.
+          if (!e.resultado || senal.aborted) throw e;
+          r = e.resultado;
+          errorGuardado = e;
+        }
+
+        if (r.estado === "nuevo") {
+          nuevos.push(obj.dni);
+          salidasPendientes.delete(obj.dni);
+          pintarFicha(obj.dni, { error: "no está en la base — usa la pestaña NUEVO PERSONAL" });
+          return "nuevo";
+        }
+
+        if (!ficha) alCalcular(r);
+        ficha.resumen = r.resumen;
+        if (errorGuardado) {
+          // lo calculado es lo que le falta a la hoja: es lo que se reintenta
+          // guardar, y la base de cualquier correccion a mano
+          ficha.valores = r.valores;
+          ficha.sinGuardar = { error: errorGuardado.causa?.message || errorGuardado.message };
+          sinGuardar.push(obj.dni);
+          consola(`  ${errorGuardado.message}`, "err");
+          consola("  la ficha queda en pantalla con lo calculado; el guardado se reintenta al terminar la lista", "warn");
+        }
+        if (ficha.guardando) {
+          ficha.guardando = false;
+          const n = el.resultados.querySelector(`[data-dni="${obj.dni}"] [data-card-n]`);
+          if (n) n.textContent = textoEstadoFicha(ficha);
+        }
+        if (r.resumen) {
+          consola(
+            `${r.resumen.vigentes.length}/${r.resumen.total} autorizaciones vigentes` +
+              (r.resumen.vencidos.length ? ` · ${r.resumen.vencidos.length} vencida(s)` : "") +
+              (r.resumen.porVencer.length ? ` · ${r.resumen.porVencer.length} por vencer` : ""),
+            r.resumen.vigentes.length === r.resumen.total ? "ok" : "warn"
+          );
+        }
+
+        // Drive no tenia la foto (o no se pudo bajar): si se habia agregado
+        // a mano en una corrida anterior, se usa esa en vez de dejar la
+        // ficha sin foto. `fotoResuelta` recien queda en true cuando se sabe
+        // si hay foto o no: la tarjeta no debe ofrecer "agregar foto"
+        // mientras se sigue buscando. En un lote, si la lectura publica no la
+        // tenia, falta preguntarle a Apps Script (etapa 2).
+        ficha.foto = ficha.foto || (await fotoP) || fotoManual;
+        ficha.fotoResuelta = Boolean(ficha.foto) || !varias;
+        if (!ficha.fotoResuelta && !sinFoto.includes(obj.dni)) sinFoto.push(obj.dni);
+        pintarFicha(obj.dni, ficha);
+        refrescarFotocheck(obj.dni);
+
+        // el antiguo llega cuando llegue: solo lo usan el modal y el Word
+        if (antiguoP) {
+          antiguoP.then((a) => {
+            if (a && !ficha.antiguoManual) ficha.antiguo = a;
+          });
+        }
+
+        if (conSalidas) {
+          mostrarProgreso(obj.dni, "salida", {
+            hecho: 0,
+            total: 1,
+            texto: varias ? "en espera: primero las fichas de toda la lista…" : "en espera de la carpeta anterior…",
+          });
+          porArmar.push({ dni: obj.dni, r, antiguoManual, antiguoP, carpeta });
+        }
+        return "ok";
+      } catch (e) {
+        salidasPendientes.delete(obj.dni);
+        if (senal.aborted) return "abortado";
+        consola(`  ${e.message}`, "err");
+        pintarFicha(obj.dni, {
+          error: reintento || !varias ? escaparHtml(e.message) : `${escaparHtml(e.message)} — se reintenta al terminar la lista`,
+        });
+        return "error";
+      }
+    }
+
+    /** Foto que la lectura publica no tenia: se le pide a Apps Script (una vez por DNI). */
+    const fotosTardias = new Map();
+    function fotoTardia(dni) {
+      if (!fotosTardias.has(dni)) {
+        const p = fotoDeDni(dni, senal, { fondo: true })
+          .catch(() => null)
+          .then((foto) => {
+            const f = fichas.get(dni);
+            if (f?.persona && !f.fotoResuelta) {
+              if (foto && !f.foto) f.foto = foto;
+              f.fotoResuelta = true;
+              pintarFicha(dni, f); // sin foto aparece "SIN FOTO · AGREGAR"
+              refrescarFotocheck(dni);
+            }
+            return fichas.get(dni)?.foto || foto;
+          });
+        fotosTardias.set(dni, p);
+      }
+      return fotosTardias.get(dni);
+    }
+
+    /** Etapa 2 de una persona: su carpeta de Drive. `alBajar` avisa cuando ya bajo todo (el ZIP esta listo). */
+    async function armarSalida({ dni, r, antiguoManual, antiguoP, carpeta }, { alBajar = () => {} } = {}) {
+      const ficha = fichas.get(dni);
+      if (!ficha?.persona || senal.aborted) {
+        mostrarProgreso(dni, "salida", null);
+        salidasPendientes.delete(dni);
+        alBajar();
+        return;
+      }
+      const logSalida = varias ? (m, t) => consola(`[${dni}] ${m}`, t) : consola;
+      barra.set(hechas, lista.length, `${dni} · generando salidas`);
+      // el reloj del tiempo restante arranca aca, no mientras se esperaba turno
+      if (ficha.progreso) delete ficha.progreso.salida;
+      mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "creando la carpeta…" });
+      mostrarProgreso(dni, "armado", { hecho: 0, total: 1, texto: "bajando certificados…" });
+      try {
+        // Se arma con la ficha como esta AHORA: en un lote pudo corregirse a
+        // mano mientras se leian las demas personas.
+        const salida = await generarSalidas({ ...r, despues: ficha.persona, detalle: ficha.detalle || r.detalle }, contexto, {
+          log: logSalida,
+          excluidos: excluidosDe(dni),
+          senal,
+          fondo: varias,
+          avance: (hecho, total, que) => {
+            barra.set(hechas, lista.length, `${dni} · ${que}`);
+            mostrarProgreso(dni, "salida", { hecho, total, texto: que });
+          },
+          avanceZip: (hecho, total, que) => {
+            if (fichas.get(dni)?.progreso?.armado) mostrarProgreso(dni, "armado", { hecho, total, texto: que });
+          },
+          // el ZIP se puede bajar ya, con Drive todavia subiendo
+          alZipListo: (parcial) => {
+            ficha.salida = { ...(ficha.salida || {}), archivos: parcial.archivos, blobs: parcial.blobs, nombre: parcial.nombre };
+            mostrarProgreso(dni, "armado", null);
+            pintarFicha(dni, ficha);
+            alBajar();
+          },
+          antiguoManual,
+          material: { foto: ficha.foto || (varias ? fotoTardia(dni) : null), antiguo: antiguoP },
+          // en un lote la carpeta se prepara recien ahora; con uno solo ya se
+          // vacio al leer la fila
+          carpeta: carpeta || (varias ? vaciarCarpeta(ficha.persona, contexto, { log: logSalida, senal, fondo: true }) : null),
+        });
+        salidasPendientes.delete(dni);
+        delete ficha.errorSalida;
+        ficha.salida = salida;
+        if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
+        conSalida++;
+        mostrarProgreso(dni, "armado", null);
+        mostrarProgreso(dni, "salida", null);
+        pintarFicha(dni, ficha);
+        contar();
+        // se corrigio algo en la ficha mientras se armaba la carpeta
+        if (ficha.salidaDesactualizada) programarSincronizacion(dni, 0);
+      } catch (e) {
+        salidasPendientes.delete(dni);
+        mostrarProgreso(dni, "armado", null);
+        mostrarProgreso(dni, "salida", null);
+        if (senal.aborted) return;
+        ficha.errorSalida = e.message;
+        fallos++;
+        logSalida(`no se pudo generar la carpeta: ${e.message}`, "err");
+        pintarFicha(dni, ficha);
+      } finally {
+        alBajar();
+      }
+    }
 
     try {
       if (!contexto) {
@@ -1984,232 +2332,69 @@ export function montarRenovacion() {
       // siguientes: no pasan por Apps Script, asi que no le quitan turno a nada
       const inventarioDe = adelantarInventarios(lista.map((o) => o.dni), senal);
 
+      /* ---------------- etapa 1: fichas ---------------- */
       for (const [i, obj] of lista.entries()) {
         if (senal.aborted) break;
-        barra.set(hechas, lista.length, `${obj.dni} · leyendo`);
         consola.cabecera(`[${i + 1}/${lista.length}] DNI ${obj.dni}`);
-        if (!soloConsulta && el.salidas.checked) salidasPendientes.add(obj.dni);
-        const inventario = inventarioDe(i);
-
-        try {
-          // el fotocheck antiguo adjuntado a mano (botones de la ficha) no viene
-          // de esta corrida: se rescata de la ficha anterior para no perderlo,
-          // anverso y reverso por separado (por si luego se reemplaza uno solo).
-          const anterior = fichas.get(obj.dni);
-          const antiguoManual = anterior?.antiguoManual || null;
-          const antiguoAnversoFile = anterior?.antiguoAnversoFile || null;
-          const antiguoReversoFile = anterior?.antiguoReversoFile || null;
-          // igual que el antiguo: si la foto se agrego a mano y la subida a
-          // FOTOS fallo (o Drive todavia no la indexa), no se pierde al
-          // volver a correr la lista.
-          const fotoManual = anterior?.fotoManual || null;
-
-          // La foto solo necesita el DNI: se pide YA, en paralelo con la hoja y
-          // el inventario de certificados, para que el fotocheck se vea con su
-          // foto apenas se pinta la ficha y no al final de las subidas. El
-          // fotocheck antiguo depende de la fila: se pide en cuanto se lee,
-          // aprovechando que la fila de Apps Script queda libre mientras se
-          // consultan JOMISER, EIN y Drive.
-          const fotoP = fotoDeDni(obj.dni, senal).catch(() => null);
-          // la foto se pinta en cuanto llega, en la ficha que haya en ese
-          // momento (la preliminar o la completa)
-          fotoP.then((foto) => {
-            const actual = fichas.get(obj.dni);
-            if (!foto || !actual?.persona || actual.foto) return;
-            actual.foto = foto;
-            pintarFoto(el.resultados.querySelector(`[data-dni="${obj.dni}"]`), actual);
-            refrescarFotocheck(obj.dni);
-          });
-          let antiguoP = null;
-          const comunes = () => ({
-            ediciones: {},
-            datosEdit: {},
-            seleccion: new Set(),
-            consulta: soloConsulta,
-            antiguoManual,
-            antiguoAnversoFile,
-            antiguoReversoFile,
-            antiguo: antiguoManual,
-            fotoManual,
-            foto: fichas.get(obj.dni)?.foto || null,
-          });
-          // Etapa 1: la fila de la hoja ya se leyo. Se pinta la ficha con sus
-          // datos y fechas (solo para mirar) mientras llegan los certificados.
-          let carpeta = null;
-          const alLeer = (p, registro) => {
-            // DNI identificado: su carpeta de Drive se vacia ya, para que al
-            // terminar tenga solo lo que suba esta renovacion
-            if (!soloConsulta && el.salidas.checked) {
-              const logCarpeta = lista.length > 1 ? (m, t) => consola(`[${obj.dni}] ${m}`, t) : consola;
-              carpeta = vaciarCarpeta(p, contexto, { log: logCarpeta, senal });
-            }
-            if (!antiguoManual && p.fotocheckAntiguoDriveId) {
-              antiguoP = fotoAntigua(p.fotocheckAntiguoDriveId, senal).catch(() => null);
-            }
-            if (!registro?.valores) return;
-            pintarFicha(obj.dni, {
-              ...comunes(),
-              persona: p,
-              detalle: [],
-              alertas: [],
-              inventario: [],
-              fila: registro.fila,
-              valores: registro.valores,
-              cargando: true,
-            });
-          };
-          // Etapa 2: certificados cruzados con la hoja. Se pinta la ficha
-          // completa sin esperar a que la escritura termine de hacer fila en
-          // Apps Script; la cabecera dice "guardando…" hasta que confirme.
-          let ficha = null;
-          const alCalcular = (parcial) => {
-            ficha = {
-              ...comunes(),
-              persona: parcial.despues,
-              detalle: parcial.detalle,
-              alertas: parcial.alertas,
-              resumen: soloConsulta ? resumenAutorizaciones(parcial.detalle) : undefined,
-              inventario: parcial.inventario?.items || [],
-              fila: parcial.fila,
-              valores: parcial.enHoja,
-              guardando: !soloConsulta && el.escribir.checked,
-            };
-            pintarFicha(obj.dni, ficha);
-          };
-
-          const r = soloConsulta
-            ? await consultarPersona(obj.dni, contexto, { log: consola, senal, alLeer, alCalcular, inventario })
-            : await renovarPersona(obj.dni, contexto, {
-                log: consola,
-                senal,
-                escribir: el.escribir.checked,
-                alLeer,
-                alCalcular,
-                inventario,
-              });
-
-          if (r.estado === "nuevo") {
-            nuevos.push(obj.dni);
-            salidasPendientes.delete(obj.dni);
-            pintarFicha(obj.dni, { error: "no está en la base — usa la pestaña NUEVO PERSONAL" });
-            hechas++;
-            continue;
-          }
-
-          if (!ficha) alCalcular(r);
-          ficha.resumen = r.resumen;
-          if (ficha.guardando) {
-            ficha.guardando = false;
-            const n = el.resultados.querySelector(`[data-dni="${obj.dni}"] [data-card-n]`);
-            if (n) n.textContent = textoEstadoFicha(ficha);
-          }
-          if (r.resumen) {
-            consola(
-              `${r.resumen.vigentes.length}/${r.resumen.total} autorizaciones vigentes` +
-                (r.resumen.vencidos.length ? ` · ${r.resumen.vencidos.length} vencida(s)` : "") +
-                (r.resumen.porVencer.length ? ` · ${r.resumen.porVencer.length} por vencer` : ""),
-              r.resumen.vigentes.length === r.resumen.total ? "ok" : "warn"
-            );
-          }
-
-          // Drive no tenia la foto (o no se pudo bajar): si se habia agregado
-          // a mano en una corrida anterior, se usa esa en vez de dejar la
-          // ficha sin foto. `fotoResuelta` recien queda en true aca: hasta
-          // este punto no se sabe todavia si hay foto o no, y la tarjeta no
-          // debe ofrecer "agregar foto" mientras se sigue buscando. Casi
-          // siempre la foto ya llego mientras se leia el inventario.
-          ficha.foto = ficha.foto || (await fotoP) || fotoManual;
-          ficha.fotoResuelta = true;
-          pintarFicha(obj.dni, ficha);
-          refrescarFotocheck(obj.dni);
-
-          // el antiguo llega cuando llegue: solo lo usan el modal y el Word
-          if (antiguoP) {
-            antiguoP.then((a) => {
-              if (a && !ficha.antiguoManual) ficha.antiguo = a;
-            });
-          }
-
-          if (!soloConsulta && el.salidas.checked) {
-            // Las salidas de esta persona corren en segundo plano mientras se
-            // lee a la siguiente: las descargas y la busqueda no pasan por
-            // Apps Script, asi que se solapan. Se genera una carpeta a la vez
-            // para no mezclar sus subidas.
-            const dni = obj.dni;
-            mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "en espera de la carpeta anterior…" });
-            await salidaEnCurso;
-            if (senal.aborted) {
-              mostrarProgreso(dni, "salida", null);
-              salidasPendientes.delete(dni);
-              break;
-            }
-            const varias = lista.length > 1;
-            const logSalida = varias ? (m, t) => consola(`[${dni}] ${m}`, t) : consola;
-            barra.set(hechas, lista.length, `${dni} · generando salidas`);
-            // el reloj del tiempo restante arranca aca, no mientras se esperaba turno
-            if (fichas.get(dni)?.progreso) delete fichas.get(dni).progreso.salida;
-            mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "creando la carpeta…" });
-            mostrarProgreso(dni, "armado", { hecho: 0, total: 1, texto: "bajando certificados…" });
-            salidaEnCurso = generarSalidas(r, contexto, {
-              log: logSalida,
-              excluidos: excluidosDe(dni),
-              senal,
-              avance: (hecho, total, que) => {
-                barra.set(hechas, lista.length, `${dni} · ${que}`);
-                mostrarProgreso(dni, "salida", { hecho, total, texto: que });
-              },
-              avanceZip: (hecho, total, que) => {
-                if (fichas.get(dni)?.progreso?.armado) mostrarProgreso(dni, "armado", { hecho, total, texto: que });
-              },
-              // el ZIP se puede bajar ya, con Drive todavia subiendo
-              alZipListo: (parcial) => {
-                ficha.salida = { ...(ficha.salida || {}), archivos: parcial.archivos, blobs: parcial.blobs, nombre: parcial.nombre };
-                mostrarProgreso(dni, "armado", null);
-                pintarFicha(dni, ficha);
-              },
-              antiguoManual,
-              material: { foto: ficha.foto, antiguo: antiguoP },
-              carpeta,
-            })
-              .then(
-                (salida) => {
-                  salidasPendientes.delete(dni);
-                  delete ficha.errorSalida;
-                  ficha.salida = salida;
-                  if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
-                  conSalida++;
-                  mostrarProgreso(dni, "armado", null);
-                  mostrarProgreso(dni, "salida", null);
-                  pintarFicha(dni, ficha);
-                  el.resCount.textContent = `${hechas}/${lista.length} · ${conSalida} con salidas`;
-                },
-                (e) => {
-                  salidasPendientes.delete(dni);
-                  mostrarProgreso(dni, "armado", null);
-                  mostrarProgreso(dni, "salida", null);
-                  if (senal.aborted) return;
-                  ficha.errorSalida = e.message;
-                  fallos++;
-                  logSalida(`no se pudo generar la carpeta: ${e.message}`, "err");
-                }
-              );
-          }
-        } catch (e) {
-          salidasPendientes.delete(obj.dni);
-          if (senal.aborted) break;
-          fallos++;
-          consola(`  ${e.message}`, "err");
-          pintarFicha(obj.dni, { error: e.message });
+        const estado = await procesar(obj, { inventario: inventarioDe(i) });
+        if (estado === "abortado") break;
+        if (estado === "error" && varias) conError.push(obj);
+        else {
+          if (estado === "error") fallos++;
+          hechas++;
         }
-
-        hechas++;
         barra.set(hechas, lista.length, `${hechas}/${lista.length}`);
-        el.resCount.textContent =
-          `${hechas}/${lista.length}` + (soloConsulta ? " consultada(s)" : ` · ${conSalida} con salidas`);
+        contar();
       }
 
-      // la ultima carpeta puede seguir subiendo
-      await salidaEnCurso;
+      // una saturacion de Apps Script no se lleva a nadie: los que fallaron
+      // se vuelven a procesar una vez, con el script ya mas tranquilo
+      if (conError.length && !senal.aborted) {
+        consola.cabecera(`REINTENTO · ${conError.length} DNI que fallaron`);
+        for (const obj of conError) {
+          if (senal.aborted) break;
+          consola.cabecera(`DNI ${obj.dni} · reintento`);
+          const estado = await procesar(obj, { reintento: true });
+          if (estado === "abortado") break;
+          if (estado === "error") fallos++;
+          hechas++;
+          barra.set(hechas, lista.length, `${hechas}/${lista.length}`);
+          contar();
+        }
+      }
+
+      if (sinGuardar.length && !senal.aborted) {
+        consola.cabecera(`GUARDANDO DE NUEVO · ${sinGuardar.length} ficha(s) sin guardar en la hoja`);
+        for (const dni of sinGuardar) {
+          if (senal.aborted) break;
+          await reintentarGuardado(dni, { senal });
+        }
+      }
+
+      /* ---------------- etapa 2: carpetas de Drive ---------------- */
+      soltarFondo();
+      if (varias && !senal.aborted) sinFoto.forEach(fotoTardia);
+      if (porArmar.length && !senal.aborted) {
+        if (varias) consola.cabecera(`CARPETAS DE DRIVE · ${porArmar.length} persona(s)`);
+        // Una carpeta a la vez, pero la persona siguiente empieza a bajar sus
+        // certificados (no pasan por Apps Script) apenas la anterior termino
+        // de bajar los suyos, mientras esa sube a Drive.
+        for (const { dni } of porArmar) {
+          if (fichas.get(dni)?.progreso?.salida) {
+            mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "en espera de la carpeta anterior…" });
+          }
+        }
+        const enVuelo = [];
+        for (const item of porArmar) {
+          if (senal.aborted) break;
+          let bajo = () => {};
+          const bajado = new Promise((listo) => (bajo = listo));
+          enVuelo.push(armarSalida(item, { alBajar: bajo }));
+          await bajado;
+        }
+        await Promise.all(enVuelo);
+      }
+      await Promise.all(fotosTardias.values());
 
       /* ---------------- cierre ---------------- */
       barra.set(1, 1, senal.aborted ? "abortado" : "completado");
@@ -2222,21 +2407,30 @@ export function montarRenovacion() {
 
       consola.cabecera(`${soloConsulta ? "CONSULTA COMPLETA" : "COMPLETADO"} · ${hechas} persona(s)`);
       if (nuevos.length) consola(`${nuevos.length} no estaban en la base: ${nuevos.join(", ")}`, "warn");
+      const pendientesHoja = sinGuardar.filter((dni) => fichas.get(dni)?.sinGuardar);
+      if (pendientesHoja.length) {
+        consola(
+          `${pendientesHoja.length} ficha(s) siguen sin guardarse en la hoja: ${pendientesHoja.join(", ")} · usa SIN GUARDAR · REINTENTAR en su ficha`,
+          "err"
+        );
+      }
 
       const detalleAviso =
         `${hechas - fallos - nuevos.length} ${soloConsulta ? "consultada(s)" : "renovada(s)"}` +
         (conSalida ? `, ${conSalida} con carpeta en Drive` : "") +
         (nuevos.length ? `, ${nuevos.length} sin ficha` : "") +
-        (fallos ? `, ${fallos} con error` : "");
+        (fallos ? `, ${fallos} con error` : "") +
+        (pendientesHoja.length ? `, ${pendientesHoja.length} sin guardar en la hoja` : "");
       notificar(
         soloConsulta ? "Consulta completa" : "Renovación completa",
         detalleAviso,
-        fallos || nuevos.length ? "warn" : "ok"
+        fallos || nuevos.length || pendientesHoja.length ? "warn" : "ok"
       );
     } catch (e) {
       consola(`la corrida se detuvo: ${e.message}`, "err");
       notificar("Renovación interrumpida", e.message, "warn");
     } finally {
+      soltarFondo();
       salidasPendientes.clear();
       corriendo = false;
       el.run.disabled = false;

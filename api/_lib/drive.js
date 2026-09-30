@@ -264,6 +264,28 @@ async function carpetaFotosPublica(cfg) {
   return fotosFolderPromise;
 }
 
+/**
+ * Baja un archivo de Drive por su id con la API key, sin pasar por Apps
+ * Script: solo funciona si el archivo es publico ("cualquiera con el
+ * enlace"). null si no se puede (sin API key, privado, inexistente).
+ */
+export async function driveBajarPublico(id) {
+  const cfg = configurado();
+  if (!cfg || !id) return null;
+  const base = `${DRIVE_API}/files/${encodeURIComponent(id)}`;
+  try {
+    const [meta, contenido] = await Promise.all([
+      pedir(`${base}?fields=${encodeURIComponent("name,mimeType")}&key=${cfg.apiKey}`, { intentos: 1 }),
+      pedir(`${base}?alt=media&key=${cfg.apiKey}`, { intentos: 1, timeout: 60000 }),
+    ]);
+    if (meta.res.status !== 200 || contenido.res.status !== 200 || !contenido.buffer.length) return null;
+    const info = JSON.parse(meta.buffer.toString("utf8"));
+    return { id, name: info.name || "", mimeType: info.mimeType || "application/octet-stream", datos: contenido.buffer };
+  } catch {
+    return null;
+  }
+}
+
 export async function driveFotoBuscar(dni) {
   const cfg = configurado();
   if (!cfg) return null;

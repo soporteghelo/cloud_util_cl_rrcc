@@ -17,6 +17,7 @@
 import { buscar, descargar, sheets, drive, driveDirecto, aBase64, desdeBase64, blobABase64 } from "./api.js";
 import { obtenerContexto, obtenerPersonal, obtenerPersona, anotarPersona } from "./datos.js";
 import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila, normalizarDocumento } from "../../shared/estados.js";
+import { CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { fotocheckImagen, nombreFotocheck } from "./fotocheck.js";
 import { armarAutorizacion, medirImagen } from "./docx.js";
 
@@ -99,11 +100,24 @@ export const nombresEnCarpeta = (cert) => [...new Set([nombreEnCarpeta(cert), no
 /**
  * Renueva a una persona y deja su fila escrita en la hoja.
  * Devuelve { estado: "ok" | "nuevo" | "error", ... }.
+ *
+ * Si el guardado falla aun despues de reintentar, lanza un error que trae la
+ * renovacion ya calculada en `error.resultado` (con `sinGuardar: true`), para
+ * que un lote pueda seguir con esa persona y reintentar el guardado al final.
+ * `reintentosGuardado`: un lote pasa 0 (no frena la lista: reintenta al final).
  */
 export async function renovarPersona(
   dni,
   ctx,
-  { log = () => {}, senal, escribir = true, alLeer = null, alCalcular = null, inventario: adelantado = null } = {}
+  {
+    log = () => {},
+    senal,
+    escribir = true,
+    alLeer = null,
+    alCalcular = null,
+    inventario: adelantado = null,
+    reintentosGuardado = REINTENTOS_GUARDADO,
+  } = {}
 ) {
   log(`buscando ${dni} en la base y sus certificados (JOMISER + EIN + Drive)...`);
   // el inventario solo necesita el DNI: se pide YA, en paralelo con la fila.
@@ -175,13 +189,38 @@ export async function renovarPersona(
   }
 
   if (escribir) {
-    await sheets(
-      { accion: "guardar", fila: registro.fila, valores: resultado.fila, noMapeados: resultado.noMapeados, marca: Date.now() },
-      senal
-    );
-    // el resto de las pestanas repinta sola con esta fila: no hay que recargar
-    anotarPersona({ dni, fila: registro.fila, valores: resultado.fila });
-    log("fila actualizada en la hoja", "ok");
+    try {
+      // Verificado: una respuesta rota de Google (la pagina 404, frecuente en
+      // lotes de varios DNI) ya no tumba a la persona. Si la hoja ya lo tiene
+      // cuenta como guardado; si no, se reintenta. Con la respuesta sana no se
+      // relee, para no sumar otra llamada a Apps Script por persona.
+      // el resto de las pestanas repinta sola con esta fila (anotarPersona)
+      const guardado = await guardarFilaVerificada({
+        fila: registro.fila,
+        valores: resultado.fila,
+        dni,
+        codigos: CODIGOS_RRCC,
+        noMapeados: resultado.noMapeados,
+        senal,
+        releer: "si-falla",
+        reintentos: reintentosGuardado,
+      });
+      log(
+        guardado.recuperado
+          ? "fila actualizada en la hoja (Google respondió con error, pero el guardado quedó confirmado)"
+          : "fila actualizada en la hoja",
+        "ok"
+      );
+    } catch (e) {
+      if (senal?.aborted) throw e;
+      // La renovacion ya esta calculada y es valida: quien llama puede seguir
+      // con ella (pintar la ficha, armar la carpeta) y reintentar el guardado
+      // despues. `enHoja` vuelve a ser la fila original: la hoja no cambio.
+      const error = new Error(`no se pudo guardar la fila en la hoja: ${e.message}`);
+      error.causa = e;
+      error.resultado = { ...salida, enHoja: copiarFila(registro.valores), sinGuardar: true };
+      throw error;
+    }
   }
 
   return salida;
@@ -190,6 +229,33 @@ export async function renovarPersona(
 /* ------------------------------------------------------------------ */
 /* Guardar una fila y comprobar que la hoja la tiene                   */
 /* ------------------------------------------------------------------ */
+
+/** Reintentos extra de un guardado cuya respuesta llego rota (ademas de los del puente). */
+const REINTENTOS_GUARDADO = 2;
+/** Espera antes de reintentar un guardado (x numero de intento). */
+const ESPERA_GUARDADO_MS = 4000;
+
+/**
+ * Solo se repite un guardado cuya ejecucion quedo en duda: la respuesta llego
+ * rota o vacia (`reintentable`), o ni siquiera hubo respuesta (se corto la
+ * red: el error no trae estado HTTP). Un error que Code.gs explico es real.
+ */
+const repetibleGuardado = (e) => Boolean(e?.reintentable) || (e?.estado === undefined && e?.name !== "AbortError");
+
+function pausa(ms, senal) {
+  return new Promise((listo, falla) => {
+    if (senal?.aborted) return falla(new DOMException("abortado", "AbortError"));
+    const t = setTimeout(listo, ms);
+    senal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        falla(new DOMException("abortado", "AbortError"));
+      },
+      { once: true }
+    );
+  });
+}
 
 /**
  * Guarda la fila y la RELEE de la hoja para confirmar que quedo como se pidio.
@@ -200,50 +266,102 @@ export async function renovarPersona(
  * falla pero la relectura muestra la fila como se pidio, cuenta como guardado
  * (`recuperado`). Si falla y la hoja no coincide, se lanza el error original.
  *
+ * Si la hoja tampoco lo tiene y la falla fue una respuesta rota (o no hubo
+ * respuesta), el guardado se vuelve a mandar hasta `reintentos` veces, con
+ * una espera creciente: guardar reescribe la misma fila y la `marca` es la
+ * misma en todos los intentos, asi que repetirlo no duplica ni revierte nada.
+ * Un error que Code.gs si explico (validacion, hoja inexistente) no se repite.
+ *
+ * `releer`: "siempre" (lo que confirma una edicion a mano) o "si-falla" (la
+ * renovacion de un lote: con la respuesta sana basta, y releer costaria una
+ * llamada mas a Apps Script por persona).
+ *
  * `codigos` = los riesgos que se quiere comprobar; `datos` = columnas de A:O
  * a corregir ({ "F. Vencimiento": "2026-10-03", "Area Planilla": "MINA" }), que
  * tambien se comprueban. Devuelve { fila, valores
- * (la fila tal como esta en la hoja), diferencias, confirmado, recuperado }.
+ * (la fila tal como esta en la hoja), diferencias, confirmado, recuperado, intentos }.
  */
-export async function guardarFilaVerificada({ fila, valores, dni, codigos, datos = {}, noMapeados = [], senal }) {
-  let errorGuardado = null;
-  let respuesta = null;
-  try {
-    // `marca`: Code.gs descarta una escritura mas vieja que llegue despues de
-    // esta (una ejecucion anterior que Google dejo corriendo tras una
-    // respuesta rota), en vez de dejar que revierta lo que se guarda ahora
-    respuesta = await sheets({ accion: "guardar", fila, valores, datos, noMapeados, marca: Date.now() }, senal);
-  } catch (e) {
-    if (senal?.aborted) throw e;
-    errorGuardado = e;
-  }
+export async function guardarFilaVerificada({
+  fila,
+  valores,
+  dni,
+  codigos,
+  datos = {},
+  noMapeados = [],
+  senal,
+  releer = "siempre",
+  reintentos = REINTENTOS_GUARDADO,
+  esperaMs = ESPERA_GUARDADO_MS,
+}) {
+  // `marca`: Code.gs descarta una escritura mas vieja que llegue despues de
+  // esta (una ejecucion anterior que Google dejo corriendo tras una respuesta
+  // rota), en vez de dejar que revierta lo que se guarda ahora. Es UNA para
+  // todos los intentos: un reintento no es una escritura nueva.
+  const marca = Date.now();
+  const columnas = Object.keys(datos);
 
-  let leido = null;
-  try {
-    // `refrescar` obligatorio: la gracia de este paso es ver lo que quedo en
-    // la hoja, no lo que la app creia que habia
-    leido = await obtenerPersona(dni, { refrescar: true, senal });
-  } catch (e) {
-    if (errorGuardado) throw errorGuardado; // ni se pudo guardar ni comprobar
-    throw new Error(`se guardo, pero no se pudo releer la hoja para confirmarlo: ${e.message}`);
-  }
-  if (!leido?.encontrada || Number(leido.fila) !== Number(fila)) {
-    throw errorGuardado || new Error("no se pudo confirmar: la persona no esta en la fila esperada de la hoja");
-  }
+  for (let intento = 0; ; intento++) {
+    let errorGuardado = null;
+    let respuesta = null;
+    try {
+      // los cursos sin mapear solo van en el primer intento: si ese se
+      // ejecuto aunque la respuesta llegara rota, repetirlos los duplicaria
+      const pedido = { accion: "guardar", fila, valores, datos, noMapeados: intento ? [] : noMapeados, marca };
+      respuesta = await sheets(pedido, senal);
+    } catch (e) {
+      if (senal?.aborted) throw e;
+      errorGuardado = e;
+    }
 
-  const diferencias = diferenciasFila(valores, leido.valores, codigos, Object.keys(datos));
-  if (errorGuardado && diferencias.length) throw errorGuardado; // no se guardo
-  // lo releido es la version confirmada: con eso se parchea lo compartido y
-  // las demas pestanas quedan al dia sin volver a bajar el listado
-  anotarPersona({ dni, fila: leido.fila, valores: leido.valores });
-  return {
-    fila: Number(fila),
-    valores: copiarFila(leido.valores),
-    diferencias,
-    confirmado: diferencias.length === 0,
-    recuperado: Boolean(errorGuardado),
-    formulaReemplazada: respuesta?.formulaReemplazada || [],
-  };
+    if (!errorGuardado && releer === "si-falla") {
+      anotarPersona({ dni, fila, valores });
+      return {
+        fila: Number(fila),
+        valores: copiarFila(valores),
+        diferencias: [],
+        confirmado: true,
+        recuperado: intento > 0,
+        intentos: intento + 1,
+        formulaReemplazada: respuesta?.formulaReemplazada || [],
+      };
+    }
+
+    let leido = null;
+    try {
+      // `refrescar` obligatorio: la gracia de este paso es ver lo que quedo en
+      // la hoja, no lo que la app creia que habia
+      leido = await obtenerPersona(dni, { refrescar: true, senal });
+    } catch (e) {
+      if (senal?.aborted) throw e;
+      if (!errorGuardado) throw new Error(`se guardo, pero no se pudo releer la hoja para confirmarlo: ${e.message}`);
+      // ni se pudo guardar ni comprobar: se reintenta el guardado (abajo)
+    }
+
+    if (leido) {
+      if (!leido.encontrada || Number(leido.fila) !== Number(fila)) {
+        throw errorGuardado || new Error("no se pudo confirmar: la persona no esta en la fila esperada de la hoja");
+      }
+      const diferencias = diferenciasFila(valores, leido.valores, codigos, columnas);
+      if (!errorGuardado || !diferencias.length) {
+        // lo releido es la version confirmada: con eso se parchea lo compartido
+        // y las demas pestanas quedan al dia sin volver a bajar el listado
+        anotarPersona({ dni, fila: leido.fila, valores: leido.valores });
+        return {
+          fila: Number(fila),
+          valores: copiarFila(leido.valores),
+          diferencias,
+          confirmado: diferencias.length === 0,
+          recuperado: Boolean(errorGuardado) || intento > 0,
+          intentos: intento + 1,
+          formulaReemplazada: respuesta?.formulaReemplazada || [],
+        };
+      }
+    }
+
+    // no se guardo (o no se pudo comprobar)
+    if (!repetibleGuardado(errorGuardado) || intento >= reintentos) throw errorGuardado;
+    await pausa(esperaMs * (intento + 1), senal);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -362,8 +480,13 @@ let loteDisponible = true;
  * se acumula y sale todo junto en la llamada siguiente. Asi las descargas no
  * esperan a las subidas, y las subidas pagan el costo fijo de Apps Script una
  * vez por tanda y no una vez por archivo.
+ *
+ * `juntarP`: la primera tanda espera ademas a esta promesa (en la carpeta de
+ * una persona, a que esten todos los archivos), para no gastar una llamada en
+ * el primer certificado que llega solo. `fondo`: carril de la cola de Apps
+ * Script (ver `drive`).
  */
-function colaDeSubida(carpetaP, senal) {
+function colaDeSubida(carpetaP, senal, { juntarP = null, fondo = false } = {}) {
   const pendientes = [];
   let activo = false;
 
@@ -376,7 +499,8 @@ function colaDeSubida(carpetaP, senal) {
             carpetaId,
             archivos: tanda.map(({ nombre, mime, datos }) => ({ nombre, mime, datos })),
           },
-          senal
+          senal,
+          { fondo }
         );
         if (Array.isArray(r.archivos) && r.archivos.length === tanda.length) {
           tanda.forEach((a, i) => a.listo(r.archivos[i]));
@@ -392,7 +516,7 @@ function colaDeSubida(carpetaP, senal) {
     }
     for (const a of tanda) {
       try {
-        a.listo(await drive({ accion: "subir", carpetaId, nombre: a.nombre, mime: a.mime, datos: a.datos }, senal));
+        a.listo(await drive({ accion: "subir", carpetaId, nombre: a.nombre, mime: a.mime, datos: a.datos }, senal, { fondo }));
       } catch (e) {
         a.fallo(e);
       }
@@ -403,6 +527,7 @@ function colaDeSubida(carpetaP, senal) {
     activo = true;
     try {
       const { carpetaId } = await carpetaP;
+      if (juntarP) await juntarP;
       while (pendientes.length) {
         if (senal?.aborted) throw new DOMException("abortado", "AbortError");
         const tanda = [pendientes.shift()];
@@ -433,6 +558,15 @@ function colaDeSubida(carpetaP, senal) {
   };
 }
 
+/**
+ * Sube varios archivos a una carpeta en la menor cantidad de llamadas (un
+ * `subir-lote` mientras quepan). Devuelve lo subido, en el mismo orden.
+ */
+export function subirArchivos(carpetaId, archivos, senal, opciones = {}) {
+  const subir = colaDeSubida(Promise.resolve({ carpetaId }), senal, opciones);
+  return Promise.all(archivos.map((a) => subir(a)));
+}
+
 /** Recorre `lista` con hasta `n` trabajos a la vez. */
 async function enParalelo(lista, n, fn, senal) {
   let i = 0;
@@ -450,9 +584,15 @@ async function enParalelo(lista, n, fn, senal) {
  *   - el Word con el fotocheck nuevo (10 x 8 cm) y la foto del antiguo.
  *
  * Todo lo que no depende entre si corre a la vez: la carpeta se crea
- * mientras bajan los PDF, los PDF bajan de a varios, cada uno se encola para
- * subir apenas llega, y el fotocheck y el Word se arman en el navegador en
- * paralelo con todo eso.
+ * mientras bajan los PDF, los PDF bajan de a varios y el fotocheck y el Word
+ * se arman en el navegador en paralelo con todo eso. Las subidas esperan a
+ * que este TODO (certificados, fotocheck y Word) y salen juntas, en la menor
+ * cantidad de llamadas a Apps Script: cada una cuesta segundos fijos, y en un
+ * lote de varios DNI son las que saturan el Web App.
+ *
+ * `fondo`: todo lo que va a Apps Script (carpeta, foto, subidas) viaja por el
+ * carril de fondo de la cola, para no quitarle el turno a las fichas de un
+ * lote (ver `retenerFondo` en api.js).
  *
  * `excluidos` = claves (`claveCertificado`) de los certificados que se
  * quitaron con la "x": no se bajan ni se suben.
@@ -479,6 +619,7 @@ export async function generarSalidas(
     material = null,
     excluidos = null,
     carpeta = null,
+    fondo = false,
   } = {}
 ) {
   const persona = resultado.despues;
@@ -486,7 +627,7 @@ export async function generarSalidas(
 
   const crear = () => {
     log(`carpeta de Drive "${nombre}"...`);
-    const p = drive({ accion: "carpeta", nombre, dni: persona.dni }, senal);
+    const p = drive({ accion: "carpeta", nombre, dni: persona.dni }, senal, { fondo });
     p.then(
       (c) => log(textoCarpeta(c), "ok"),
       () => {}
@@ -496,7 +637,10 @@ export async function generarSalidas(
   // la vaciada al identificar a la persona sirve solo si es la misma carpeta
   // (si se corrigio el nombre en el camino, la carpeta es otra)
   const carpetaP = carpeta && carpeta.nombre === nombre ? carpeta.promesa.catch(crear) : crear();
-  const subir = colaDeSubida(carpetaP, senal);
+  // la primera tanda sale cuando todo lo de la carpeta ya esta en memoria
+  let soltarSubidas = () => {};
+  const juntarP = new Promise((listo) => (soltarSubidas = listo));
+  const subir = colaDeSubida(carpetaP, senal, { juntarP, fondo });
 
   const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [], archivos: [] };
 
@@ -520,7 +664,7 @@ export async function generarSalidas(
 
   /* --- foto y fotocheck antiguo: los adelantados, o se piden ahora --- */
   const fotoP = Promise.resolve(
-    material && "foto" in material ? material.foto : fotoDeDni(persona.dni, senal)
+    material && "foto" in material ? material.foto : fotoDeDni(persona.dni, senal, { fondo })
   ).catch((e) => {
     log(`  sin foto de la persona: ${e.message}`, "warn");
     return null;
@@ -528,7 +672,7 @@ export async function generarSalidas(
   const antiguoP = antiguoManual
     ? Promise.resolve(antiguoManual)
     : Promise.resolve(
-        material && "antiguo" in material ? material.antiguo : fotoAntigua(persona.fotocheckAntiguoDriveId, senal)
+        material && "antiguo" in material ? material.antiguo : fotoAntigua(persona.fotocheckAntiguoDriveId, senal, { fondo })
       ).catch((e) => {
         log(`  sin foto del fotocheck antiguo: ${e.message}`, "warn");
         return null;
@@ -540,6 +684,7 @@ export async function generarSalidas(
   // armar (parte del ZIP) y subir (parte de Drive) van separados: el ZIP no
   // espera a que el fotocheck y el Word terminen de subir
   let fotocheckSubido = null;
+  let wordSubido = null;
   const armadoP = (async () => {
     const foto = await fotoP;
     const img = await fotocheckImagen(persona, { foto });
@@ -574,12 +719,9 @@ export async function generarSalidas(
     salida.blobs = { fotocheck: img.blob, word: docx };
     salida.foto = foto;
     salida.antiguo = antiguo;
-    return docx;
-  })();
-  armadoP.catch(() => {});
 
-  const documentosP = armadoP.then(async (docx) => {
-    const wordSubido = subir({
+    // se encola aca y no despues: asi entra en la misma tanda que el resto
+    wordSubido = subir({
       nombre: nombreWord,
       mime: MIME_DOCX,
       datos: await blobABase64(docx),
@@ -588,6 +730,12 @@ export async function generarSalidas(
       paso("Word subido");
       return r;
     });
+    wordSubido.catch(() => {});
+    return docx;
+  })();
+  armadoP.catch(() => {});
+
+  const documentosP = armadoP.then(async () => {
     [salida.fotocheck, salida.word] = await Promise.all([fotocheckSubido, wordSubido]);
   });
   documentosP.catch(() => {});
@@ -704,6 +852,8 @@ export async function generarSalidas(
     }
   });
   zipP.catch(() => {});
+  // todo lo que va a la carpeta ya esta encolado: salen las subidas (juntas)
+  Promise.allSettled([descargasP, armadoP]).then(() => soltarSubidas());
 
   await descargasP;
   await Promise.all(subidas);
@@ -713,7 +863,7 @@ export async function generarSalidas(
   await zipP;
 
   if (!(await carpetaP).vaciada) {
-    await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFoto, nombreWord], { log, senal });
+    await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFoto, nombreWord], { log, senal, fondo });
   }
   return salida;
 }
@@ -740,14 +890,14 @@ function textoCarpeta(c) {
   return "carpeta ya existia, se actualiza";
 }
 
-export function vaciarCarpeta(persona, ctx, { log = () => {}, senal } = {}) {
+export function vaciarCarpeta(persona, ctx, { log = () => {}, senal, fondo = false } = {}) {
   const nombre = nombreCarpeta(persona, ctx.config);
   const promesa = (async () => {
     log(`carpeta de Drive "${nombre}"...`);
     // `vaciar`: el Code.gs nuevo manda todo a la papelera en la misma
     // ejecucion (1 llamada a Apps Script en vez de 3). Uno viejo ignora el
     // pedido y no devuelve `vaciada`: entonces se lista y se borra desde aca.
-    const c = await drive({ accion: "carpeta", nombre, dni: persona.dni, vaciar: true }, senal);
+    const c = await drive({ accion: "carpeta", nombre, dni: persona.dni, vaciar: true }, senal, { fondo });
     if (c.creada) {
       log(textoCarpeta(c), "ok");
       return { ...c, vaciada: true };
@@ -762,12 +912,12 @@ export function vaciarCarpeta(persona, ctx, { log = () => {}, senal } = {}) {
       return c;
     }
     try {
-      const { archivos = [] } = await drive({ accion: "listar", carpetaId: c.carpetaId }, senal);
+      const { archivos = [] } = await drive({ accion: "listar", carpetaId: c.carpetaId }, senal, { fondo });
       const nombres = [
         ...new Set(archivos.filter((a) => a.mimeType !== "application/vnd.google-apps.folder").map((a) => a.name)),
       ];
       if (nombres.length) {
-        await drive({ accion: "eliminar", carpetaId: c.carpetaId, nombres }, senal);
+        await drive({ accion: "eliminar", carpetaId: c.carpetaId, nombres }, senal, { fondo });
         log(`carpeta vaciada: ${nombres.length} archivo(s) anteriores a la papelera`, "ok");
       } else {
         log("carpeta ya existia, estaba vacia", "ok");
@@ -779,7 +929,10 @@ export function vaciarCarpeta(persona, ctx, { log = () => {}, senal } = {}) {
       return { ...c, vaciada: false };
     }
   })();
-  promesa.catch(() => {});
+  // sin esto la falla quedaba muda: `generarSalidas` crea la carpeta de nuevo
+  promesa.catch((e) => {
+    if (!senal?.aborted) log(`  no se pudo preparar la carpeta (se reintenta al subir): ${e.message}`, "warn");
+  });
   return { nombre, promesa };
 }
 
@@ -796,14 +949,14 @@ const mismoNombre = (n) => String(n || "").replace(/\s+/g, " ").trim().toLowerCa
  * conserva aunque la subida haya fallado, porque la version anterior tiene el
  * mismo nombre y es mejor que nada. Un fallo al limpiar solo se avisa.
  */
-export async function limpiarCarpeta(salida, pedidos, { log = () => {}, senal } = {}) {
+export async function limpiarCarpeta(salida, pedidos, { log = () => {}, senal, fondo = false } = {}) {
   const conservar = new Set(
     [...pedidos, ...salida.certificados.map((c) => c.nombre), salida.fotocheck?.nombre, salida.word?.nombre]
       .filter(Boolean)
       .map(mismoNombre)
   );
   try {
-    const { archivos = [] } = await drive({ accion: "listar", carpetaId: salida.carpetaId }, senal);
+    const { archivos = [] } = await drive({ accion: "listar", carpetaId: salida.carpetaId }, senal, { fondo });
     const viejos = [
       ...new Set(
         archivos
@@ -812,7 +965,7 @@ export async function limpiarCarpeta(salida, pedidos, { log = () => {}, senal } 
       ),
     ];
     if (!viejos.length) return;
-    await drive({ accion: "eliminar", carpetaId: salida.carpetaId, nombres: viejos }, senal);
+    await drive({ accion: "eliminar", carpetaId: salida.carpetaId, nombres: viejos }, senal, { fondo });
     salida.eliminados = viejos;
     log(`${viejos.length} archivo(s) de renovaciones anteriores enviados a la papelera: ${viejos.join(", ")}`, "ok");
   } catch (e) {
@@ -832,8 +985,12 @@ export async function limpiarCarpeta(salida, pedidos, { log = () => {}, senal } 
  * Primero la lectura publica, SIN hacer fila detras de Apps Script: asi la
  * foto llega mientras se leen la hoja y los certificados. Solo si ahi no
  * aparece se le pregunta a Apps Script (eso si respeta la fila).
+ *
+ * `soloPublica`: no se llega a Apps Script; si la lectura publica no la
+ * encuentra devuelve null (un lote de varios DNI deja esa consulta, que es
+ * lenta, para despues de pintar todas las fichas). `fondo`: carril de la cola.
  */
-export async function fotoDeDni(dni, senal) {
+export async function fotoDeDni(dni, senal, { soloPublica = false, fondo = false } = {}) {
   if (!dni) throw new Error("la fila no tiene DNI");
   let r = null;
   try {
@@ -841,15 +998,29 @@ export async function fotoDeDni(dni, senal) {
   } catch (e) {
     if (senal?.aborted) throw e;
   }
-  if (!r || r.respaldo) r = await drive({ accion: "foto-de", dni }, senal);
+  if (!r || r.respaldo) {
+    if (soloPublica) return null;
+    r = await drive({ accion: "foto-de", dni }, senal, { fondo });
+  }
   if (!r.encontrada) throw new Error(`no hay foto de ${dni} en la carpeta FOTOS`);
   return `data:${r.mime};base64,${r.datos}`;
 }
 
-/** Foto del fotocheck antiguo, con sus dimensiones (para no deformarla). */
-export async function fotoAntigua(idDrive, senal) {
+/**
+ * Foto del fotocheck antiguo, con sus dimensiones (para no deformarla).
+ *
+ * Igual que la foto: primero la lectura publica de Drive (no hace fila detras
+ * de Apps Script); si el archivo no es publico, se le pide a Apps Script.
+ */
+export async function fotoAntigua(idDrive, senal, { fondo = false } = {}) {
   if (!idDrive) throw new Error("la fila no tiene FOTOCHECK_ANTIGUO_DRIVE_ID");
-  const r = await drive({ accion: "bajar", id: idDrive }, senal);
+  let r = null;
+  try {
+    r = await driveDirecto({ accion: "bajar", id: idDrive, soloPublica: true }, senal);
+  } catch (e) {
+    if (senal?.aborted) throw e;
+  }
+  if (!r?.datos) r = await drive({ accion: "bajar", id: idDrive }, senal, { fondo });
   const bytes = desdeBase64(r.datos);
   const medida = await medirImagen(new Blob([bytes], { type: r.mime }));
   return { datos: bytes, mime: r.mime, ancho: medida.ancho, alto: medida.alto };

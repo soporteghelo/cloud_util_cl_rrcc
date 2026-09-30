@@ -1093,6 +1093,8 @@ input[type="date"].inp { color-scheme: dark; }
 .cert-item:hover { border-color: var(--cy); background: #0a1622; }
 .cert-item b { font-size: 10px; line-height: 1.2; overflow-wrap: anywhere; }
 .cert-item span, .cert-vacio { color: var(--tx-mute); font-size: 9px; line-height: 1.35; }
+/* la fecha del certificado (EIN / induccion) en rojo para que salte a la vista */
+.cert-item .cert-dia { color: var(--rd); font-size: 10px; font-weight: 700; }
 .cert-item.disabled { cursor: default; opacity: 0.65; border-left-color: var(--am); }
 .cert-item.disabled:hover { background: #07101a; border-color: var(--line-soft); }
 /* la "x" de la esquina superior derecha: quita el certificado de la carpeta y del ZIP */
@@ -1352,6 +1354,8 @@ button.cert-fecha:hover, button.cert-fecha:focus-visible { background: rgba(0, 2
 .card-head-ren { grid-template-areas: "nom lista" "res lista"; }
 .card-barra .card-id { grid-area: id; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card-barra .card-n { margin-left: 0; }
+/* la renovacion se calculo pero la hoja no la recibio (Apps Script saturado) */
+.card-n.card-n-error { color: var(--rd); font-weight: 700; }
 .card-barra .aplicar-c { grid-area: ctl; justify-self: end; margin-left: 0; }
 .card-barra .edicion-barra { grid-area: edit; }
 .card-barra .pendientes { grid-area: pend; }

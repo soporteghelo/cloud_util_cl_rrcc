@@ -121,6 +121,43 @@ export async function descargar(cuerpo, senal) {
 const pendientes = { urgente: [], normal: [], fondo: [] };
 let enCurso = false;
 
+/*
+ * Respiro despues de una respuesta rota. La pagina 404 de Google llega
+ * cuando el script esta lento, y la ejecucion suele seguir corriendo en
+ * Google aunque el puente ya se haya rendido: mandar el pedido siguiente en
+ * ese mismo instante lo pone a competir con ella, y en un lote de varios DNI
+ * eso encadena una respuesta rota tras otra. Con unos segundos de espera la
+ * ejecucion abandonada termina y el siguiente encuentra el script libre.
+ * `enfriarMs` es configurable para las pruebas.
+ */
+export const AJUSTES_COLA = { enfriarMs: 3000 };
+let enfriarHasta = 0;
+
+/*
+ * Carril de fondo retenido. Un lote de varios DNI primero pinta TODAS las
+ * fichas (leer la fila, cruzar certificados, guardar) y recien despues arma
+ * las carpetas de Drive. Mientras se retiene, lo del carril de fondo espera
+ * aunque Apps Script este libre: un pedido que ya salio no se puede frenar, y
+ * una subida de varios MB en el aire dejaba el guardado de la persona
+ * siguiente esperando hasta agotar el tiempo.
+ */
+let retenciones = 0;
+
+/** Retiene el carril de fondo hasta llamar a la funcion devuelta (una sola vez cuenta). */
+export function retenerFondo() {
+  retenciones++;
+  let suelto = false;
+  return () => {
+    if (suelto) return;
+    suelto = true;
+    retenciones--;
+    bombear();
+  };
+}
+
+const hayListo = () =>
+  pendientes.urgente.length > 0 || pendientes.normal.length > 0 || (retenciones === 0 && pendientes.fondo.length > 0);
+
 function unoALaVez(tarea, carril = "normal") {
   return new Promise((listo, falla) => {
     pendientes[carril].push({ tarea, listo, falla });
@@ -129,14 +166,23 @@ function unoALaVez(tarea, carril = "normal") {
 }
 
 async function bombear() {
-  if (enCurso) return;
-  const siguiente = pendientes.urgente.shift() || pendientes.normal.shift() || pendientes.fondo.shift();
-  if (!siguiente) return;
+  if (enCurso || !hayListo()) return;
 
   enCurso = true;
+  const respiro = enfriarHasta - Date.now();
+  if (respiro > 0) await new Promise((r) => setTimeout(r, respiro));
+  // se elige DESPUES del respiro: lo urgente que llego mientras tanto pasa primero
+  const siguiente =
+    pendientes.urgente.shift() || pendientes.normal.shift() || (retenciones === 0 ? pendientes.fondo.shift() : null);
+  if (!siguiente) {
+    // el fondo quedo retenido durante el respiro
+    enCurso = false;
+    return;
+  }
   try {
     siguiente.listo(await siguiente.tarea());
   } catch (e) {
+    if (e?.reintentable) enfriarHasta = Date.now() + AJUSTES_COLA.enfriarMs;
     siguiente.falla(e); // un pedido fallido no debe atascar la fila
   } finally {
     enCurso = false;
@@ -165,12 +211,15 @@ export function sheets(cuerpo, senal, { fondo = false } = {}) {
 /* Salidas en Google Drive                                             */
 /* ------------------------------------------------------------------ */
 
-/** Una accion de /api/drive-output: carpeta | subir | foto | bajar | listar. */
-export function drive(cuerpo, senal) {
+/**
+ * Una accion de /api/drive-output: carpeta | subir | foto | bajar | listar.
+ * `fondo: true` la manda por el carril de fondo (las carpetas de un lote).
+ */
+export function drive(cuerpo, senal, { fondo = false } = {}) {
   // todas las acciones de Drive dan lo mismo si corren dos veces: `carpeta`
   // reutiliza la que exista, `subir` reemplaza por nombre, `eliminar` manda a
   // la papelera lo que haya, y el resto solo lee
-  return unoALaVez(() => conReintentos(() => json("/api/drive-output", cuerpo, senal), senal));
+  return unoALaVez(() => conReintentos(() => json("/api/drive-output", cuerpo, senal), senal), fondo ? "fondo" : "normal");
 }
 
 /**

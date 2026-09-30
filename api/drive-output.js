@@ -16,7 +16,9 @@
  *               por nombre. Con `soloPublica` no cae a Apps Script si la
  *               lectura publica no la encuentra: responde `{ respaldo: true }`
  *               y el navegador decide cuando hacer esa consulta mas lenta.
- *   bajar    ->  { id } el contenido de un archivo, en base64
+ *   bajar    ->  { id, soloPublica } el contenido de un archivo, en base64.
+ *               Con `soloPublica` solo prueba la lectura publica y, si no
+ *               puede, responde `{ respaldo: true }` sin llegar a Apps Script.
  *   listar   ->  { carpetaId } que quedo dentro
  *   eliminar ->  { carpetaId, nombres } manda esos archivos a la papelera
  *
@@ -38,7 +40,7 @@ import {
 } from "./_lib/drive-escritura.js";
 import { hayCuentaDeServicio } from "./_lib/google.js";
 import { appsScriptUrl, pedirAppsScript } from "./_lib/apps-script.js";
-import { driveFotoBuscar } from "./_lib/drive.js";
+import { driveFotoBuscar, driveBajarPublico } from "./_lib/drive.js";
 
 /** Tope defensivo: Vercel corta el cuerpo en 4.5 MB de todos modos. */
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -223,6 +225,23 @@ export default async function handler(req, res) {
           res.status(200).json({ ok: false, encontrada: false, respaldo: true, dni: body.dni });
           return;
         }
+      }
+      // el fotocheck antiguo: igual, lectura publica primero. Con
+      // `soloPublica` el navegador decide cuando pedirselo a Apps Script.
+      if (accion === "bajar" && body.soloPublica) {
+        const archivo = await driveBajarPublico(body.id);
+        if (archivo && archivo.datos.length <= MAX_BYTES) {
+          res.status(200).json({
+            ok: true,
+            id: archivo.id,
+            nombre: archivo.name,
+            mime: archivo.mimeType,
+            datos: archivo.datos.toString("base64"),
+          });
+        } else {
+          res.status(200).json({ ok: false, respaldo: true, id: body.id });
+        }
+        return;
       }
       res.status(200).json(await pedirAppsScript("drive", body));
       return;
