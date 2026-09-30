@@ -916,6 +916,17 @@ h1 {
   min-width: 0;
 }
 
+/* en renovacion la lista de DNIs ocupa poco: la columna de entrada va a la
+   mitad y el resto se lo llevan las autorizaciones */
+#vista-renovacion { grid-template-columns: clamp(160px, 12vw, 230px) minmax(0, 1fr); }
+/* columna angosta: botones compactos que bajan de linea antes que desbordar */
+#vista-renovacion .col-in .row-btns { flex-wrap: wrap; gap: 6px; }
+#vista-renovacion .col-in .row-btns .btn { flex: 1 1 auto; min-width: 0; }
+#vista-renovacion .col-in .btn { padding: 8px 8px; gap: 6px; font-size: 10.5px; letter-spacing: 0.06em; }
+#vista-renovacion .col-in .panel-head { flex-wrap: wrap; row-gap: 4px; }
+#vista-renovacion .col-in .panel-head h2 { white-space: normal; }
+#vista-renovacion .col-in .btn-go { font-size: 11px; letter-spacing: 0.08em; white-space: normal; }
+
 /* ---------------- pestanas ---------------- */
 
 .tabs {
@@ -2258,6 +2269,26 @@ button.pend-chip { cursor: pointer; }
 .ed-detalle b { color: var(--tx); }
 .ed-zip { flex: 0 0 auto; border-color: var(--gr); color: var(--gr); }
 
+/* Por persona: quien es arriba y dos mitades independientes, ZIP | DRIVE,
+   cada una con su estado, su barra y su tiempo restante. */
+.ed-par { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
+.ed-par .ed-quien { margin-top: 0; padding: 0 2px; }
+.ed-mitades { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ed-mitad { flex-direction: column; align-items: stretch; gap: 6px; padding: 9px 10px; min-width: 0; }
+.ed-espera { --ed-c: var(--tx-mute); }
+.ed-cabeza { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ed-mitad .ed-spin, .ed-mitad .ed-icono { width: 28px; height: 28px; font-size: 15px; }
+.ed-espera .ed-icono::before { content: "\2026"; }
+.ed-destino { color: var(--tx-dim); font-size: 10px; font-weight: 700; letter-spacing: 0.16em; }
+.ed-mitad .ed-titulo { font-size: 15px; }
+.ed-barra { height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--ed-c) 18%, transparent); overflow: hidden; }
+.ed-barra i { display: block; height: 100%; background: var(--ed-c); transition: width 0.4s ease; }
+.ed-cifras { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--tx-dim); }
+.ed-cifras b { color: var(--tx); }
+.ed-cifras span { color: var(--am); white-space: nowrap; }
+.ed-mitad .ed-detalle { margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-mitad .ed-zip { width: 100%; }
+
 /* icono fijo: check (listo), signo de exclamacion (pendiente / error) */
 .ed-icono {
   flex: 0 0 auto;
@@ -2311,4 +2342,8 @@ button.pend-chip { cursor: pointer; }
   .ed { flex-wrap: wrap; gap: 10px; }
   .ed-titulo { font-size: 15px; }
   .ed-zip { width: 100%; }
+}
+@media (max-width: 380px) {
+  /* telefonos muy angostos: ZIP arriba y DRIVE abajo */
+  .ed-mitades { grid-template-columns: 1fr; }
 }

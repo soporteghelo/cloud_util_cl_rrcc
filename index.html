@@ -184,11 +184,12 @@
 
           <section class="panel panel-go">
             <div class="panel-body">
-              <label class="check">
+              <!-- siempre activos: ocultos, pero el flujo sigue leyendo .checked -->
+              <label class="check" hidden>
                 <input type="checkbox" id="rn-salidas" checked />
                 <span>Generar carpeta en <code>RRCC/DATA</code> (certificados + fotocheck + Word)</span>
               </label>
-              <label class="check">
+              <label class="check" hidden>
                 <input type="checkbox" id="rn-escribir" checked />
                 <span>Escribir los cambios en la hoja <code>BD AESA</code></span>
               </label>
@@ -609,7 +610,7 @@
         </div>
         <div class="modal-body"><canvas id="fc-canvas"></canvas></div>
         <div class="modal-foot">
-          <button class="btn btn-ghost btn-sm" id="fc-png" type="button">DESCARGAR PNG</button>
+          <button class="btn btn-ghost btn-sm" id="fc-png" type="button">DESCARGAR IMAGEN</button>
           <button class="btn btn-go btn-sm" id="fc-docx" type="button">DESCARGAR WORD</button>
         </div>
       </div>

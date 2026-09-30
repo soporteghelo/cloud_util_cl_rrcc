@@ -143,8 +143,9 @@ export async function combinarFotocheckAntiguo(archivos) {
     x += anchos[i] + separacion;
   });
 
-  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/png"));
-  return { datos: await blob.arrayBuffer(), mime: "image/png", ancho, alto };
+  // son fotos de camara: en PNG pesaban varios MB dentro del Word, en JPEG una fraccion
+  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.88));
+  return { datos: await blob.arrayBuffer(), mime: "image/jpeg", ancho, alto };
 }
 
 /** Dibuja `img` dentro del rectangulo recortando lo que sobre (object-fit: cover). */
@@ -355,11 +356,25 @@ export async function dibujarFotocheck(persona, { foto = null, logo = "/logo-aes
   return lienzo;
 }
 
-/** El fotocheck como PNG (Blob), listo para subir a Drive o meter en el Word. */
-export async function fotocheckPng(persona, opciones = {}) {
-  const lienzo = await dibujarFotocheck(persona, opciones);
-  const blob = await new Promise((r) => lienzo.toBlob(r, "image/png"));
-  return { blob, lienzo, ancho: lienzo.width, alto: lienzo.height };
+/**
+ * Formato del fotocheck que se guarda (Drive, ZIP, Word y descarga del panel).
+ *
+ * Antes era PNG a 3x (4200 x 2760 px, ~1.4 MB): lo mas pesado de cada
+ * carpeta, y el Word lo llevaba adentro otra vez. En el Word se imprime a
+ * 10 cm de ancho: 2x (2800 px) son ~700 dpi, de sobra para imprimir nitido, y
+ * JPEG con calidad alta pesa una fraccion del PNG sin que se note en el texto.
+ */
+export const FOTOCHECK = { mime: "image/jpeg", ext: "jpg", escala: 2, calidad: 0.92 };
+
+/** Nombre del archivo del fotocheck de una persona. */
+export const nombreFotocheck = (persona) => `FOTOCHECK_${persona.nombreCompleto || persona.dni}.${FOTOCHECK.ext}`;
+
+/** El fotocheck como imagen (Blob, en el formato de FOTOCHECK), lista para subir a Drive o meter en el Word. */
+export async function fotocheckImagen(persona, opciones = {}) {
+  const lienzo = await dibujarFotocheck(persona, { escala: FOTOCHECK.escala, ...opciones });
+  const blob = await new Promise((r) => lienzo.toBlob(r, FOTOCHECK.mime, FOTOCHECK.calidad));
+  if (!blob) throw new Error("el navegador no pudo generar la imagen del fotocheck");
+  return { blob, lienzo, mime: FOTOCHECK.mime, ancho: lienzo.width, alto: lienzo.height };
 }
 
 export const PROPORCION = { ancho: BASE_W, alto: BASE_H };

@@ -32,7 +32,7 @@ import {
 import { colTipo, INDICE } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 import { armarAutorizacion } from "../lib/docx.js";
-import { dibujarFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
+import { fotocheckImagen, nombreFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
 import { abrirFotocheck, actualizarFotocheck, cerrarFotocheck, fotocheckAbiertoDe } from "./fotocheck-modal.js";
 
 export function normalizarCambiosPendientes(ficha, contextoExtra = {}) {
@@ -685,18 +685,91 @@ export function montarRenovacion() {
     const barra = ficha.progreso?.salida;
     if (barra) {
       const pct = barra.total ? Math.min(100, Math.round((barra.hecho / barra.total) * 100)) : 0;
-      return { tipo: "guardando", texto: barra.texto || "armando la carpeta…", pct, eta: etaDe(barra) };
+      return { tipo: "guardando", texto: barra.texto || "armando la carpeta…", pct, eta: etaDe(barra), zip: estadoZip(ficha) };
     }
     if (sincronizacionesEnCurso.has(dni) || temporizadoresSalida.has(dni)) {
-      return { tipo: "guardando", texto: "guardando los cambios de la ficha…" };
+      return { tipo: "guardando", texto: "guardando los cambios de la ficha…", zip: estadoZip(ficha) };
     }
     if (ficha.salida?.carpetaId) {
-      if (ficha.salidaDesactualizada) return { tipo: "pendiente", texto: "hay cambios que aún no están en Drive" };
-      return { tipo: "listo", zip: Boolean(ficha.salida.archivos?.length) };
+      if (ficha.salidaDesactualizada) return { tipo: "pendiente", texto: "hay cambios que aún no están en Drive", zip: estadoZip(ficha) };
+      return { tipo: "listo", zip: estadoZip(ficha) || { listo: true, desdeDrive: true } };
     }
-    if (ficha.errorSalida) return { tipo: "error", texto: ficha.errorSalida };
-    if (salidasPendientes.has(dni)) return { tipo: "guardando", texto: "leyendo certificados…" };
+    if (ficha.errorSalida) return { tipo: "error", texto: ficha.errorSalida, zip: estadoZip(ficha) };
+    if (salidasPendientes.has(dni)) return { tipo: "guardando", texto: "leyendo certificados…", zip: null };
     return null;
+  }
+
+  /**
+   * El ZIP (certificados + fotocheck + Word) va por su cuenta y termina antes
+   * que Drive: se arma con lo que ya esta en memoria, sin esperar las subidas.
+   */
+  function estadoZip(ficha) {
+    const armado = ficha.progreso?.armado;
+    if (armado) {
+      const pct = armado.total ? Math.min(100, Math.round((armado.hecho / armado.total) * 100)) : 0;
+      return { listo: false, texto: armado.texto || "bajando certificados…", pct, eta: etaDe(armado) };
+    }
+    return ficha.salida?.archivos?.length ? { listo: true } : null;
+  }
+
+  /** Una mitad del aviso (ZIP o DRIVE), con su propio estado, avance y tiempo restante. */
+  function htmlMitad({ tipo, destino, estado, pct, eta, detalle = "", accion = "" }) {
+    const icono = tipo === "guardando" ? `<i class="ed-spin" aria-hidden="true"></i>` : `<i class="ed-icono" aria-hidden="true"></i>`;
+    const avance =
+      pct !== undefined
+        ? `<div class="ed-barra" aria-hidden="true"><i style="width:${Math.max(pct, 3)}%"></i></div>` +
+          `<div class="ed-cifras"><b>${pct}%</b>${eta ? `<span data-ed-eta>${escaparHtml(eta)}</span>` : ""}</div>`
+        : "";
+    return (
+      `<div class="ed ed-mitad ed-${tipo}">` +
+      `<div class="ed-cabeza">${icono}<div class="ed-txt"><div class="ed-destino">${destino}</div>` +
+      `<div class="ed-titulo">${estado}</div></div></div>` +
+      avance +
+      (detalle ? `<div class="ed-detalle">${detalle}</div>` : "") +
+      accion +
+      (tipo === "guardando" ? `<div class="ed-onda" aria-hidden="true"></div>` : "") +
+      `</div>`
+    );
+  }
+
+  /** Mitad ZIP: armandose (bajando certificados, fotocheck, Word) o lista para descargar. */
+  function htmlMitadZip(dni, e) {
+    const boton = `<button type="button" class="btn btn-sm ed-zip" data-ed-zip="${escaparHtml(dni)}">DESCARGAR ZIP</button>`;
+    const z = e.zip;
+    if (z && !z.listo) {
+      return htmlMitad({ tipo: "guardando", destino: "ZIP", estado: "ARMANDO", pct: z.pct, eta: z.eta, detalle: escaparHtml(z.texto) });
+    }
+    if (z?.listo) {
+      return htmlMitad({
+        tipo: "listo",
+        destino: "ZIP",
+        estado: "LISTO",
+        detalle: z.desdeDrive ? "se arma desde la carpeta de Drive" : "certificados + fotocheck + Word",
+        accion: boton,
+      });
+    }
+    // si la carpeta fallo antes de armar el ZIP, no se queda "en espera" para siempre
+    if (e.tipo === "error") {
+      return htmlMitad({ tipo: "error", destino: "ZIP", estado: "NO SE PUDO ARMAR", detalle: "vuelve a renovar a esta persona" });
+    }
+    return htmlMitad({ tipo: "espera", destino: "ZIP", estado: "EN ESPERA", detalle: "esperando los certificados…" });
+  }
+
+  /** Mitad DRIVE: subiendo, guardado, con cambios pendientes o con error. */
+  function htmlMitadDrive(e) {
+    if (e.tipo === "guardando") {
+      return htmlMitad({ tipo: "guardando", destino: "DRIVE", estado: "SUBIENDO", pct: e.pct, eta: e.eta, detalle: escaparHtml(e.texto) });
+    }
+    if (e.tipo === "pendiente") {
+      return htmlMitad({
+        tipo: "pendiente",
+        destino: "DRIVE",
+        estado: "CAMBIOS SIN GUARDAR",
+        detalle: `${escaparHtml(e.texto)} · se guardan al abrir, compartir o descargar la carpeta`,
+      });
+    }
+    if (e.tipo === "error") return htmlMitad({ tipo: "error", destino: "DRIVE", estado: "NO SE PUDO GUARDAR", detalle: escaparHtml(e.texto) });
+    return htmlMitad({ tipo: "listo", destino: "DRIVE", estado: "GUARDADO", detalle: "la carpeta tiene todo lo de esta renovación" });
   }
 
   function htmlEstadoDrive() {
@@ -704,35 +777,13 @@ export function montarRenovacion() {
     for (const [dni, ficha] of fichas) {
       const e = estadoDrive(dni, ficha);
       if (!e) continue;
-      const quien =
-        `<span class="ed-dni">${escaparHtml(dni)}</span>` +
-        `<span class="ed-nombre">${escaparHtml(ficha.persona.nombreCompleto || "")}</span>`;
-      let titulo = "";
-      let detalle = "";
-      let accion = "";
-      if (e.tipo === "guardando") {
-        titulo = "GUARDANDO EN DRIVE";
-        detalle =
-          escaparHtml(e.texto) +
-          (e.pct !== undefined ? ` · <b>${e.pct}%</b>` : "") +
-          (e.eta ? ` · ${escaparHtml(e.eta)}` : "");
-      } else if (e.tipo === "pendiente") {
-        titulo = "CAMBIOS SIN GUARDAR";
-        detalle = `${escaparHtml(e.texto)} · se guardan al abrir, compartir o descargar la carpeta`;
-      } else if (e.tipo === "error") {
-        titulo = "NO SE PUDO GUARDAR";
-        detalle = escaparHtml(e.texto);
-      } else {
-        titulo = "GUARDADO EN DRIVE";
-        detalle = e.zip ? "ZIP listo para descargar" : "el ZIP se arma desde la carpeta de Drive";
-        accion = `<button type="button" class="btn btn-sm ed-zip" data-ed-zip="${escaparHtml(dni)}">DESCARGAR ZIP</button>`;
-      }
-      const icono = e.tipo === "guardando" ? `<i class="ed-spin" aria-hidden="true"></i>` : `<i class="ed-icono" aria-hidden="true"></i>`;
+      // por persona: quien es arriba y debajo dos mitades independientes,
+      // ZIP a la izquierda y DRIVE a la derecha, cada una con su tiempo restante
       filas.push(
-        `<div class="ed ed-${e.tipo}" role="status">${icono}` +
-          `<div class="ed-txt"><div class="ed-titulo">${titulo}</div><div class="ed-quien">${quien}</div>` +
-          `<div class="ed-detalle">${detalle}</div></div>${accion}` +
-          (e.tipo === "guardando" ? `<div class="ed-onda" aria-hidden="true"></div>` : "") +
+        `<div class="ed-par" role="status">` +
+          `<div class="ed-quien"><span class="ed-dni">${escaparHtml(dni)}</span>` +
+          `<span class="ed-nombre">${escaparHtml(ficha.persona.nombreCompleto || "")}</span></div>` +
+          `<div class="ed-mitades">${htmlMitadZip(dni, e)}${htmlMitadDrive(e)}</div>` +
           `</div>`
       );
     }
@@ -740,11 +791,26 @@ export function montarRenovacion() {
   }
 
   let ultimoEstadoDrive = "";
-  /** Repinta el aviso solo si cambio algo: asi la animacion no se reinicia a cada vuelta. */
+  const ETA_ED = /<span data-ed-eta>([^<]*)<\/span>/g;
+  /**
+   * Repinta el aviso solo si cambio algo: asi la animacion no se reinicia a
+   * cada vuelta. El tiempo restante cambia cada segundo: si es lo UNICO que
+   * cambio, se actualiza ese texto en su lugar (repintar todo reiniciaba las
+   * animaciones y podia comerse un clic en DESCARGAR ZIP).
+   */
   function pintarEstadoDrive() {
     if (!el.estadoDrive) return;
     const html = htmlEstadoDrive();
     if (html === ultimoEstadoDrive) return;
+    const sinEta = (h) => h.replace(ETA_ED, "<span data-ed-eta></span>");
+    if (sinEta(html) === sinEta(ultimoEstadoDrive)) {
+      const textos = [...html.matchAll(ETA_ED)].map((m) => m[1]);
+      el.estadoDrive.querySelectorAll("[data-ed-eta]").forEach((s, i) => {
+        s.innerHTML = textos[i] ?? "";
+      });
+      ultimoEstadoDrive = html;
+      return;
+    }
     ultimoEstadoDrive = html;
     el.estadoDrive.innerHTML = html;
     el.estadoDrive.hidden = !html;
@@ -769,7 +835,7 @@ export function montarRenovacion() {
 
   /* ---------------- progreso con tiempo restante ---------------- */
 
-  const TITULO_PROGRESO = { salida: "CARPETA EN DRIVE", zip: "DESCARGA ZIP" };
+  const TITULO_PROGRESO = { armado: "ZIP · ARMANDO", salida: "DRIVE · SUBIENDO", zip: "DESCARGA ZIP" };
 
   /**
    * Barra de avance de una tarea larga de la ficha (`salida` = armar la
@@ -846,17 +912,17 @@ export function montarRenovacion() {
   }
 
   /**
-   * El fotocheck (PNG) y el Word tal como se ven AHORA en la ficha, con
+   * El fotocheck (JPG) y el Word tal como se ven AHORA en la ficha, con
    * ediciones incluidas. Se arman en el navegador: lo usan la resubida a
    * Drive y el ZIP, que asi no tiene que bajarlos de Drive.
    */
   async function documentosActuales(ficha) {
     const persona = personaVisible(ficha);
     const foto = ficha.foto || (await fotoDeDni(persona.dni).catch(() => null));
-    const png = await dibujarFotocheck(persona, { foto, escala: 3 });
-    const pngBlob = await new Promise((resolver) => png.toBlob(resolver, "image/png"));
+    const img = await fotocheckImagen(persona, { foto });
+    const pngBlob = img.blob; // (el nombre quedo de cuando era PNG: es la imagen del fotocheck)
     const docx = await armarAutorizacion({
-      fotocheck: { datos: await pngBlob.arrayBuffer(), mime: "image/png" },
+      fotocheck: { datos: await pngBlob.arrayBuffer(), mime: img.mime },
       antiguo: ficha.antiguoManual || ficha.antiguo || null,
       medidas: {
         fotocheckAnchoCm: Number(contexto?.config?.FOTOCHECK_ANCHO_CM || 10),
@@ -868,8 +934,9 @@ export function montarRenovacion() {
     return {
       persona,
       pngBlob,
+      mimeFotocheck: img.mime,
       docx,
-      nombreFotocheck: `FOTOCHECK_${nombreBase}.png`,
+      nombreFotocheck: nombreFotocheck(persona),
       nombreWord: `Autorizacion_RRCC_${nombreBase}.docx`,
     };
   }
@@ -915,7 +982,7 @@ export function montarRenovacion() {
           accion: "subir",
           carpetaId: folderId,
           nombre: docs.nombreFotocheck,
-          mime: "image/png",
+          mime: docs.mimeFotocheck,
           datos: await blobABase64(docs.pngBlob),
         });
         const wordSubido = await drive({
@@ -2082,6 +2149,7 @@ export function montarRenovacion() {
             // el reloj del tiempo restante arranca aca, no mientras se esperaba turno
             if (fichas.get(dni)?.progreso) delete fichas.get(dni).progreso.salida;
             mostrarProgreso(dni, "salida", { hecho: 0, total: 1, texto: "creando la carpeta…" });
+            mostrarProgreso(dni, "armado", { hecho: 0, total: 1, texto: "bajando certificados…" });
             salidaEnCurso = generarSalidas(r, contexto, {
               log: logSalida,
               excluidos: excluidosDe(dni),
@@ -2089,6 +2157,15 @@ export function montarRenovacion() {
               avance: (hecho, total, que) => {
                 barra.set(hechas, lista.length, `${dni} · ${que}`);
                 mostrarProgreso(dni, "salida", { hecho, total, texto: que });
+              },
+              avanceZip: (hecho, total, que) => {
+                if (fichas.get(dni)?.progreso?.armado) mostrarProgreso(dni, "armado", { hecho, total, texto: que });
+              },
+              // el ZIP se puede bajar ya, con Drive todavia subiendo
+              alZipListo: (parcial) => {
+                ficha.salida = { ...(ficha.salida || {}), archivos: parcial.archivos, blobs: parcial.blobs, nombre: parcial.nombre };
+                mostrarProgreso(dni, "armado", null);
+                pintarFicha(dni, ficha);
               },
               antiguoManual,
               material: { foto: ficha.foto, antiguo: antiguoP },
@@ -2101,12 +2178,14 @@ export function montarRenovacion() {
                   ficha.salida = salida;
                   if (!ficha.antiguoManual && salida.antiguo) ficha.antiguo = salida.antiguo;
                   conSalida++;
+                  mostrarProgreso(dni, "armado", null);
                   mostrarProgreso(dni, "salida", null);
                   pintarFicha(dni, ficha);
                   el.resCount.textContent = `${hechas}/${lista.length} · ${conSalida} con salidas`;
                 },
                 (e) => {
                   salidasPendientes.delete(dni);
+                  mostrarProgreso(dni, "armado", null);
                   mostrarProgreso(dni, "salida", null);
                   if (senal.aborted) return;
                   ficha.errorSalida = e.message;

@@ -5,11 +5,11 @@
  * desde la corrida, asi que no se vuelve a pedir nada al servidor.
  *
  * La vista en pantalla se dibuja a escala 1 para que redibujar sea barato; el
- * PNG y el Word se generan a 3x en el momento de descargarlos.
+ * JPG y el Word se generan en alta (ver FOTOCHECK en fotocheck.js) en el momento de descargarlos.
  */
 
 import { $, descargarBlob } from "./comun.js";
-import { dibujarFotocheck, PROPORCION } from "../lib/fotocheck.js";
+import { dibujarFotocheck, fotocheckImagen, nombreFotocheck, FOTOCHECK, PROPORCION } from "../lib/fotocheck.js";
 import { armarAutorizacion } from "../lib/docx.js";
 
 /** { clave, persona, foto, antiguo, config } de lo que muestra el panel. */
@@ -67,16 +67,13 @@ export async function actualizarFotocheck(persona, opciones = {}) {
 export function montarModalFotocheck() {
   $("fc-cerrar")?.addEventListener("click", cerrarFotocheck);
 
-  // el PNG y el Word salen a 3x, dibujados con lo que muestra el panel ahora
-  const enAlta = async () => {
-    const alta = await dibujarFotocheck(actual.persona, { foto: actual.foto });
-    return new Promise((r) => alta.toBlob(r, "image/png"));
-  };
+  // la imagen y el Word salen en el mismo formato que la carpeta de Drive,
+  // dibujados con lo que muestra el panel ahora
+  const enAlta = async () => (await fotocheckImagen(actual.persona, { foto: actual.foto })).blob;
 
   $("fc-png")?.addEventListener("click", async () => {
     if (!actual) return;
-    const persona = actual.persona;
-    descargarBlob(await enAlta(), `FOTOCHECK_${persona.nombreCompleto || persona.dni}.png`);
+    descargarBlob(await enAlta(), nombreFotocheck(actual.persona));
   });
 
   $("fc-docx")?.addEventListener("click", async () => {
@@ -84,7 +81,7 @@ export function montarModalFotocheck() {
     const { persona, antiguo, config } = actual;
     const blob = await enAlta();
     const docx = await armarAutorizacion({
-      fotocheck: { datos: await blob.arrayBuffer(), mime: "image/png" },
+      fotocheck: { datos: await blob.arrayBuffer(), mime: FOTOCHECK.mime },
       antiguo,
       medidas: {
         fotocheckAnchoCm: Number(config.FOTOCHECK_ANCHO_CM || 10),

@@ -17,7 +17,7 @@
 import { buscar, descargar, sheets, drive, driveDirecto, aBase64, desdeBase64, blobABase64 } from "./api.js";
 import { obtenerContexto, obtenerPersonal, obtenerPersona, anotarPersona } from "./datos.js";
 import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila, normalizarDocumento } from "../../shared/estados.js";
-import { fotocheckPng } from "./fotocheck.js";
+import { fotocheckImagen, nombreFotocheck } from "./fotocheck.js";
 import { armarAutorizacion, medirImagen } from "./docx.js";
 
 export const MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -469,7 +469,17 @@ async function enParalelo(lista, n, fn, senal) {
 export async function generarSalidas(
   resultado,
   ctx,
-  { log = () => {}, senal, avance = () => {}, antiguoManual = null, material = null, excluidos = null, carpeta = null } = {}
+  {
+    log = () => {},
+    senal,
+    avance = () => {},
+    avanceZip = () => {},
+    alZipListo = null,
+    antiguoManual = null,
+    material = null,
+    excluidos = null,
+    carpeta = null,
+  } = {}
 ) {
   const persona = resultado.despues;
   const nombre = nombreCarpeta(persona, ctx.config);
@@ -490,12 +500,19 @@ export async function generarSalidas(
 
   const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [], archivos: [] };
 
-  /* Avance por unidades de trabajo: crear la carpeta, bajar y subir cada
-     certificado, y subir el fotocheck y el Word. `total` se fija mas abajo,
-     antes de que termine cualquiera de esas operaciones. */
+  /* Dos avances separados, porque terminan en momentos distintos:
+       - ZIP (`avanceZip`): bajar cada certificado y armar el fotocheck y el
+         Word. Al completarse, `alZipListo(salida)` avisa que el ZIP ya se
+         puede descargar, aunque Drive siga subiendo.
+       - DRIVE (`avance`): la carpeta, la subida de cada certificado y la del
+         fotocheck y el Word.
+     Los `total` se fijan mas abajo, antes de que termine cualquier operacion. */
   let total = 0;
   let hecho = 0;
   const paso = (que) => avance(Math.min(++hecho, total), total, que);
+  let totalZip = 0;
+  let hechoZip = 0;
+  const pasoZip = (que) => avanceZip(Math.min(++hechoZip, totalZip), totalZip, que);
   carpetaP.then(
     () => paso("carpeta lista"),
     () => {}
@@ -518,18 +535,23 @@ export async function generarSalidas(
       });
 
   /* --- fotocheck + Word (en el navegador, en paralelo con las descargas) --- */
-  const nombreFotocheck = `FOTOCHECK_${persona.nombreCompleto || persona.dni}.png`;
+  const nombreFoto = nombreFotocheck(persona);
   const nombreWord = `Autorizacion_RRCC_${persona.nombreCompleto || persona.dni}.docx`;
-  const documentosP = (async () => {
+  // armar (parte del ZIP) y subir (parte de Drive) van separados: el ZIP no
+  // espera a que el fotocheck y el Word terminen de subir
+  let fotocheckSubido = null;
+  const armadoP = (async () => {
     const foto = await fotoP;
-    const png = await fotocheckPng(persona, { foto });
-    const [pngBase64, pngBytes] = await Promise.all([blobABase64(png.blob), png.blob.arrayBuffer()]);
-    const fotocheckSubido = subir({
-      nombre: nombreFotocheck,
-      mime: "image/png",
-      datos: pngBase64,
+    const img = await fotocheckImagen(persona, { foto });
+    const [imgBase64, imgBytes] = await Promise.all([blobABase64(img.blob), img.blob.arrayBuffer()]);
+    const kb = (img.blob.size / 1024).toFixed(0);
+    pasoZip("fotocheck listo");
+    fotocheckSubido = subir({
+      nombre: nombreFoto,
+      mime: img.mime,
+      datos: imgBase64,
     }).then((r) => {
-      log(`fotocheck subido (${png.ancho}x${png.alto} px)`, "ok");
+      log(`fotocheck subido a Drive (${img.ancho}x${img.alto} px, ${kb} KB)`, "ok");
       paso("fotocheck subido");
       return r;
     });
@@ -537,7 +559,7 @@ export async function generarSalidas(
 
     const antiguo = await antiguoP;
     const docx = await armarAutorizacion({
-      fotocheck: { datos: pngBytes, mime: "image/png" },
+      fotocheck: { datos: imgBytes, mime: img.mime },
       antiguo,
       medidas: {
         fotocheckAnchoCm: Number(ctx.config.FOTOCHECK_ANCHO_CM || 10),
@@ -545,23 +567,29 @@ export async function generarSalidas(
         antiguoAnchoCm: Number(ctx.config.ANTIGUO_ANCHO_CM || 17),
       },
     });
+    pasoZip("Word listo");
+
+    // se devuelven las imagenes ya armadas para que la vista pueda abrir la
+    // previsualizacion sin volver a pedirlas a Drive
+    salida.blobs = { fotocheck: img.blob, word: docx };
+    salida.foto = foto;
+    salida.antiguo = antiguo;
+    return docx;
+  })();
+  armadoP.catch(() => {});
+
+  const documentosP = armadoP.then(async (docx) => {
     const wordSubido = subir({
       nombre: nombreWord,
       mime: MIME_DOCX,
       datos: await blobABase64(docx),
     }).then((r) => {
-      log(`Word de autorizacion subido`, "ok");
+      log(`Word de autorizacion subido a Drive`, "ok");
       paso("Word subido");
       return r;
     });
-
-    // se devuelven las imagenes ya armadas para que la vista pueda abrir la
-    // previsualizacion sin volver a pedirlas a Drive
-    salida.blobs = { fotocheck: png.blob, word: docx };
-    salida.foto = foto;
-    salida.antiguo = antiguo;
     [salida.fotocheck, salida.word] = await Promise.all([fotocheckSubido, wordSubido]);
-  })();
+  });
   documentosP.catch(() => {});
 
   /* --- certificados vigentes ---
@@ -607,7 +635,8 @@ export async function generarSalidas(
     vistos.add(clave);
     return true;
   });
-  total = 1 + tareas.length * 2 + 2;
+  total = 1 + tareas.length + 2; // DRIVE: carpeta + cada certificado + fotocheck + Word
+  totalZip = tareas.length + 2; // ZIP: cada certificado + fotocheck + Word
   const deLaterales = tareas.filter((t) => laterales.includes(t)).length;
   log(
     `${vigentes.length} certificado(s) vigente(s) para subir` +
@@ -621,7 +650,8 @@ export async function generarSalidas(
     salida.fallos.push({ codigo: t.codigo, error: e.message });
     log(`  · ${t.etiqueta}: ${e.message}`, "err");
   };
-  await enParalelo(
+  let bajados = 0;
+  const descargasP = enParalelo(
     tareas,
     DESCARGAS_SIMULTANEAS,
     async (t) => {
@@ -642,8 +672,8 @@ export async function generarSalidas(
           subir({ nombre: t.archivo, mime: "application/pdf", datos: aBase64(r.pdf) }).then(
             (subido) => {
               salida.certificados.push(subido);
-              log(`  · ${t.etiqueta}: ${kb} KB → ${subido.nombre}`, "ok");
-              paso(`${t.codigo} · subido`);
+              log(`  · ${t.etiqueta}: ${kb} KB → Drive (${subido.nombre})`, "ok");
+              paso(`subido ${t.codigo}`);
             },
             (e) => {
               fallo(t, e);
@@ -655,19 +685,35 @@ export async function generarSalidas(
         fallo(t, e);
         paso(`${t.codigo} · no se pudo bajar`); // tampoco se sube
       } finally {
-        paso(`${t.codigo} · ${cert.curso || t.archivo}`);
+        bajados++;
+        pasoZip(`certificados ${bajados}/${tareas.length} · ${cert.curso || t.archivo}`);
       }
     },
     senal
   );
 
+  // El ZIP esta completo cuando bajaron todos los certificados y ya estan
+  // armados el fotocheck y el Word: se avisa YA, sin esperar a Drive.
+  const zipP = Promise.all([descargasP, armadoP]).then(() => {
+    if (senal?.aborted) return;
+    log(`ZIP listo: ${salida.archivos.length} certificado(s) + fotocheck + Word · Drive sigue subiendo`, "ok");
+    try {
+      alZipListo?.(salida);
+    } catch {
+      /* un aviso que falla no frena la subida */
+    }
+  });
+  zipP.catch(() => {});
+
+  await descargasP;
   await Promise.all(subidas);
   // la carpeta es lo unico obligatorio: si no se pudo crear, ese es el error
   salida.carpetaId = (await carpetaP).carpetaId;
   await documentosP;
+  await zipP;
 
   if (!(await carpetaP).vaciada) {
-    await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFotocheck, nombreWord], { log, senal });
+    await limpiarCarpeta(salida, [...tareas.map((t) => t.archivo), nombreFoto, nombreWord], { log, senal });
   }
   return salida;
 }
