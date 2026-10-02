@@ -20,6 +20,7 @@ import {
   aFormatoCorto,
   aIso,
   sumarDias,
+  sumarAnios,
   hoyIso,
   estadoDe,
   vencimientoDe,
@@ -242,6 +243,9 @@ export function montarRenovacion() {
     const fila = aplicarEdicionesManuales(ficha.valores, visibles, { config: contexto?.config });
     const d = datosVisibles(ficha);
     fila[INDICE["F. Vencimiento"]] = d.emoVenc;
+    // con el vencimiento del EMO corregido, el examen va un anio antes
+    const examen = ficha.datosEdit?.emoVenc ? sumarAnios(d.emoVenc, -1) : "";
+    if (examen) fila[INDICE["F. Ex. Medico"]] = examen;
     fila[INDICE["Area Planilla"]] = d.area;
     fila[INDICE["Apellidos"]] = d.apellidos;
     fila[INDICE["Nombres"]] = d.nombres;
@@ -1469,7 +1473,7 @@ export function montarRenovacion() {
       (datos.sinGuardar && !datos.consulta
         ? `<button type="button" class="btn btn-warn btn-sm" data-reintentar-guardado="${dni}" title="La hoja no recibió esta renovación (${escaparHtml(datos.sinGuardar.error)}). Lo calculado sigue en pantalla: toca para volver a guardarlo">SIN GUARDAR · REINTENTAR</button>`
         : "") +
-      `<label class="campo-ficha campo-emo${datosEdit.emoVenc !== undefined ? " editado" : ""}" title="Vencimiento del examen médico (EMO). Se imprime en el fotocheck y se puede corregir aquí"><span>EMO VENCE</span>` +
+      `<label class="campo-ficha campo-emo${datosEdit.emoVenc !== undefined ? " editado" : ""}" title="Vencimiento del examen médico (EMO). Se imprime en el fotocheck y se puede corregir aquí; al cambiarlo, la F. Ex. Médico pasa a ser un año antes"><span>EMO VENCE</span>` +
       `<input type="date" data-emo-venc value="${persona.vencimientoEmo || ""}" aria-label="Vencimiento del EMO" /></label>` +
       `<label class="campo-ficha campo-area${datosEdit.area !== undefined ? " editado" : ""}" title="Área de la planilla. Se imprime en el fotocheck y se puede corregir aquí"><span>ÁREA</span>` +
       `<input type="text" id="area-${dni}" data-area value="${escaparHtml(persona.area)}" placeholder="sin área" autocomplete="off" aria-label="Área" /></label>` +
@@ -1712,6 +1716,7 @@ export function montarRenovacion() {
       return `${r.rotulo}: ${r.tipo || "sin tipo"}${r.venc ? ` · vigencia ${aFormatoCorto(r.venc)}` : " · sin vigencia"}`;
     });
     if (columnas.includes("F. Vencimiento")) lineas.push(`EMO vence ${aFormatoCorto(hoja.vencimientoEmo) || "sin fecha"}`);
+    if (columnas.includes("F. Ex. Medico")) lineas.push(`Examen médico ${aFormatoCorto(hoja.examenMedico) || "sin fecha"}`);
     if (columnas.includes("Area Planilla")) lineas.push(`Área: ${hoja.area || "vacía"}`);
     if (columnas.includes("Apellidos") || columnas.includes("Nombres")) lineas.push(`Nombre: ${hoja.nombreCompleto || "vacío"}`);
     if (columnas.includes("Cargo Planilla")) lineas.push(`Cargo: ${hoja.cargo || "vacío"}`);
@@ -1803,13 +1808,25 @@ export function montarRenovacion() {
       // vencimiento del EMO, area, nombre, cargo y empresa: columnas de A:O que se envian aparte
       const datos = {};
       if (datosEdit.emoVenc !== undefined) datos["F. Vencimiento"] = datosEdit.emoVenc;
+      // el examen un anio antes del vencimiento, igual que en el fotocheck
+      if (datosEdit.emoVenc) datos["F. Ex. Medico"] = sumarAnios(datosEdit.emoVenc, -1);
       if (datosEdit.area !== undefined) datos["Area Planilla"] = datosEdit.area;
       if (datosEdit.apellidos !== undefined) datos["Apellidos"] = datosEdit.apellidos.toUpperCase();
       if (datosEdit.nombres !== undefined) datos["Nombres"] = datosEdit.nombres.toUpperCase();
       if (datosEdit.cargo !== undefined) datos["Cargo Planilla"] = datosEdit.cargo;
       if (datosEdit.empresa !== undefined) datos["EMPRESA"] = datosEdit.empresa;
       for (const [columna, valor] of Object.entries(datos)) valores[INDICE[columna]] = valor;
-      const guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
+      let guardado;
+      try {
+        guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
+      } catch (e) {
+        // un Code.gs sin redesplegar todavia no deja escribir el examen: se guarda lo demas
+        if (!datos["F. Ex. Medico"] || !/no editable.*F\. Ex\. Medico/.test(e.message)) throw e;
+        delete datos["F. Ex. Medico"];
+        valores[INDICE["F. Ex. Medico"]] = ficha.valores[INDICE["F. Ex. Medico"]];
+        consola("el examen médico no se escribió en la hoja: falta redesplegar Apps Script (Code.gs)", "warn");
+        guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
+      }
 
       // se vuelve a calcular contra los certificados, sin red, para que los
       // estados y el resumen salgan con la fila tal como quedo en la hoja

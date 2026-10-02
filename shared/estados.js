@@ -96,6 +96,19 @@ export function sumarDias(iso, dias) {
   return new Date(t + dias * DIA).toISOString().slice(0, 10);
 }
 
+/**
+ * El mismo dia `anios` anios despues (o antes, si es negativo): 15/10/2026
+ * menos un anio es 15/10/2025. Un 29/02 que cae en anio comun pasa al 28/02.
+ */
+export function sumarAnios(iso, anios) {
+  const v = aIso(iso);
+  if (!v) return "";
+  const p = v.split("-").map(Number);
+  const anio = p[0] + anios;
+  const ultimo = new Date(Date.UTC(anio, p[1], 0)).getUTCDate();
+  return new Date(Date.UTC(anio, p[1] - 1, Math.min(p[2], ultimo))).toISOString().slice(0, 10);
+}
+
 /** Dias enteros entre dos fechas ISO (b - a). */
 export function diasEntre(a, b) {
   const ta = Date.parse(a + "T00:00:00Z");
@@ -680,6 +693,7 @@ export function aplicarEdicionesManuales(fila, ediciones, opciones = {}) {
  * como se comparan y como se llaman en los avisos.
  */
 export const DATOS_EDITABLES = {
+  "F. Ex. Medico": { tipo: "fecha", codigo: "EMO", campo: "examen médico" },
   "F. Vencimiento": { tipo: "fecha", codigo: "EMO", campo: "vencimiento del EMO" },
   "Area Planilla": { tipo: "texto", codigo: "AREA", campo: "área" },
   Apellidos: { tipo: "texto", codigo: "APELLIDOS", campo: "apellidos" },

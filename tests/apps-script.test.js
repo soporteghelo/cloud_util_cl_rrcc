@@ -301,6 +301,18 @@ test("guardar puede corregir el vencimiento del EMO y el area sin tocar el resto
   assert.equal(hoja.celda(4, IE_CAP).v, "2026-08-09", "y el bloque de riesgos se escribe como siempre");
 });
 
+test("guardar puede escribir el examen medico junto con su vencimiento", () => {
+  const hoja = hojaSimulada("BD_AESA", 98);
+  const api = cargar(hoja);
+  const p = filaDe(api, { DNI: 11111111, "F. Ex. Medico": "2025-10-03", "F. Vencimiento": "2026-10-03" });
+  hoja.getRange(4, 1, 1, p.length).setValues([p]);
+
+  api.guardar({ fila: 4, valores: filaDe(api, {}), datos: { "F. Vencimiento": "2026-10-15", "F. Ex. Medico": "2025-10-15" } });
+
+  assert.equal(hoja.celda(4, COL_EMO_VENC).v, "2026-10-15");
+  assert.equal(hoja.celda(4, 13).v, "2025-10-15");
+});
+
 test("un vencimiento del EMO en blanco deja la celda vacia", () => {
   const hoja = hojaSimulada("BD_AESA", 98);
   const api = cargar(hoja);

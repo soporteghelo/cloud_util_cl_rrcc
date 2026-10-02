@@ -15,6 +15,7 @@ import {
   aIso,
   serialAIso,
   sumarDias,
+  sumarAnios,
   diasEntre,
   aFormatoCorto,
   normalizarCurso,
@@ -78,6 +79,14 @@ test("sumarDias y diasEntre cuadran con el ano de vigencia", () => {
   assert.equal(sumarDias("2026-09-12", 365), "2027-09-12");
   assert.equal(diasEntre("2026-09-12", "2027-09-12"), 365);
   assert.equal(aFormatoCorto("2027-09-12"), "12/09/2027");
+});
+
+test("sumarAnios resta un anio de calendario (examen medico desde el vencimiento del EMO)", () => {
+  assert.equal(sumarAnios("2026-10-15", -1), "2025-10-15");
+  assert.equal(sumarAnios("2029-03-01", -1), "2028-03-01", "cruza un 29/02 sin correrse un dia");
+  assert.equal(sumarAnios("2028-02-29", -1), "2027-02-28", "29/02 en anio comun pasa al 28/02");
+  assert.equal(sumarAnios("15/10/2026", -1), "2025-10-15");
+  assert.equal(sumarAnios("", -1), "");
 });
 
 /* ------------------------------------------------------------------ */

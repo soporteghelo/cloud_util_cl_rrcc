@@ -171,8 +171,8 @@ function escribirBloque(sh, fila, valores, heredar) {
   const formulas=destino.getFormulas()[0];
   destino.setValues([formulas.map((f,i)=>f||(COL_ESTADO.indexOf(inicio+i)>=0?formulaEstado(inicio+i,fila):v[inicio+i]))]);
 }
-/** Columnas de A:O que la ficha puede corregir a mano (vencimiento del EMO, area, nombre, cargo y empresa). El resto de A:O no se toca. */
-const EDITABLES = { "F. Vencimiento": "fecha", "Area Planilla": "texto", "Apellidos": "texto", "Nombres": "texto", "Cargo Planilla": "texto", "EMPRESA": "texto" };
+/** Columnas de A:O que la ficha puede corregir a mano (examen y vencimiento del EMO, area, nombre, cargo y empresa). El resto de A:O no se toca. */
+const EDITABLES = { "F. Ex. Medico": "fecha", "F. Vencimiento": "fecha", "Area Planilla": "texto", "Apellidos": "texto", "Nombres": "texto", "Cargo Planilla": "texto", "EMPRESA": "texto" };
 /**
  * Escribe esas columnas para una fila. Los nombres se validan ANTES de escribir nada. Si la celda tenia una
  * formula se reemplaza por lo escrito (es una correccion explicita) y el nombre vuelve en la respuesta.

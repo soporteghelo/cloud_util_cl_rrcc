@@ -262,6 +262,7 @@ export async function escribirFilaPersonal(fila, valores) {
 
 /** Columnas de A:O que la ficha puede corregir a mano; el resto de A:O no se toca. */
 export const COLUMNAS_EDITABLES = {
+  "F. Ex. Medico": "fecha",
   "F. Vencimiento": "fecha",
   "Area Planilla": "texto",
   Apellidos: "texto",
