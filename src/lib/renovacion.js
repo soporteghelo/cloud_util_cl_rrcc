@@ -578,8 +578,73 @@ async function enParalelo(lista, n, fn, senal) {
 }
 
 /**
+ * Un RRCC lleva su certificado a la carpeta mientras siga en vigor: VIGENTE
+ * o POR VENCER (ACTUALIZAR). Un "por vencer" sigue respaldado por ese PDF
+ * hasta su vencimiento, y es justo lo que se renueva: dejarlo fuera vaciaba
+ * el ZIP de quien tiene casi todo por vencer (p. ej. los certificados de
+ * respaldo de Drive del ultimo anio). VENCIDO o sin fecha no entra.
+ */
+const ESTADOS_EN_CARPETA = ["VIGENTE", "ACTUALIZAR"];
+
+/**
+ * Que certificados van a la carpeta de la persona (y al ZIP), uno por
+ * archivo y en el orden en que se bajan.
+ *
+ * Tanto "A" (autorizados) como "C" (capacitados) suben su PDF si sigue en
+ * vigor (`ESTADOS_EN_CARPETA`) y se puede descargar.
+ *
+ * El PDF consolidado de Drive (en `personales`) no es de ningun curso, asi
+ * que no entra en la grilla de riesgos, pero es un certificado de la persona
+ * y va en su carpeta igual.
+ *
+ * Los certificados de EIN y de INDUCCION (los del panel lateral de la ficha)
+ * van TODOS a la carpeta, esten o no en la grilla: quien no deba ir se quita
+ * con la "x" de ese panel (`excluidos`).
+ */
+export function certificadosDeCarpeta(resultado, excluidos = null) {
+  const vigentes = (resultado.detalle || [])
+    .filter(
+      (d) =>
+        ESTADOS_EN_CARPETA.includes(d.estado) &&
+        d.certificado &&
+        d.certificado.descargable &&
+        d.certificado.origen !== "EIN"
+    )
+    .map((d) => ({ codigo: d.codigo, etiqueta: d.codigo, cert: d.certificado, archivo: nombreCertificado(d.certificado) }));
+  const extra = (resultado.personales || [])
+    .filter((item) => item.descargable && item.origen !== "INDUCCION")
+    .map((item) => ({
+      codigo: "DRIVE",
+      etiqueta: `[${item.origen}]`,
+      cert: item,
+      archivo: nombrePersonal(item),
+      personal: true,
+    }));
+  const laterales = (resultado.inventario?.items || [])
+    .filter((item) => item.descargable && ORIGENES_LATERALES.includes(item.origen))
+    .map((item) => ({
+      codigo: item.origen,
+      etiqueta: `[${item.origen}] ${item.curso || ""}`.trim(),
+      cert: item,
+      archivo: nombreEnCarpeta(item),
+      personal: true,
+    }));
+  // uno por certificado (el mismo puede estar en la grilla y en el panel), y
+  // los quitados con la "x" no se suben ni entran al ZIP
+  const vistos = new Set();
+  const tareas = [...vigentes, ...extra, ...laterales].filter((t) => {
+    const clave = claveCertificado(t.cert);
+    if (vistos.has(clave) || excluidos?.has(clave)) return false;
+    vistos.add(clave);
+    return true;
+  });
+  const deLaterales = tareas.filter((t) => laterales.includes(t)).length;
+  return { tareas, vigentes, extra, deLaterales };
+}
+
+/**
  * Crea la carpeta de la persona en Drive y le deja dentro:
- *   - los certificados de los RRCC que quedaron VIGENTES,
+ *   - los certificados de los RRCC que siguen en vigor (vigentes o por vencer),
  *   - el PNG del fotocheck nuevo,
  *   - el Word con el fotocheck nuevo (10 x 8 cm) y la foto del antiguo.
  *
@@ -740,54 +805,11 @@ export async function generarSalidas(
   });
   documentosP.catch(() => {});
 
-  /* --- certificados vigentes ---
-   * Tanto "A" (autorizados) como "C" (capacitados) suben su PDF si esta
-   * vigente y se puede descargar.
-   *
-   * El PDF consolidado de Drive (en `personales`) no es de ningun curso, asi
-   * que no entra en la grilla de riesgos, pero es un certificado de la
-   * persona y va en su carpeta igual.
-   *
-   * Los certificados de EIN y de INDUCCION (los del panel lateral de la
-   * ficha) van TODOS a la carpeta, esten o no en la grilla: quien no deba ir
-   * se quita con la "x" de ese panel (`excluidos`). */
-  const vigentes = resultado.detalle
-    .filter(
-      (d) => d.estado === "VIGENTE" && d.certificado && d.certificado.descargable && d.certificado.origen !== "EIN"
-    )
-    .map((d) => ({ codigo: d.codigo, etiqueta: d.codigo, cert: d.certificado, archivo: nombreCertificado(d.certificado) }));
-  const extra = (resultado.personales || [])
-    .filter((item) => item.descargable && item.origen !== "INDUCCION")
-    .map((item) => ({
-      codigo: "DRIVE",
-      etiqueta: `[${item.origen}]`,
-      cert: item,
-      archivo: nombrePersonal(item),
-      personal: true,
-    }));
-  const laterales = (resultado.inventario?.items || [])
-    .filter((item) => item.descargable && ORIGENES_LATERALES.includes(item.origen))
-    .map((item) => ({
-      codigo: item.origen,
-      etiqueta: `[${item.origen}] ${item.curso || ""}`.trim(),
-      cert: item,
-      archivo: nombreEnCarpeta(item),
-      personal: true,
-    }));
-  // uno por certificado (el mismo puede estar en la grilla y en el panel), y
-  // los quitados con la "x" no se suben ni entran al ZIP
-  const vistos = new Set();
-  const tareas = [...vigentes, ...extra, ...laterales].filter((t) => {
-    const clave = claveCertificado(t.cert);
-    if (vistos.has(clave) || excluidos?.has(clave)) return false;
-    vistos.add(clave);
-    return true;
-  });
+  const { tareas, vigentes, extra, deLaterales } = certificadosDeCarpeta(resultado, excluidos);
   total = 1 + tareas.length + 2; // DRIVE: carpeta + cada certificado + fotocheck + Word
   totalZip = tareas.length + 2; // ZIP: cada certificado + fotocheck + Word
-  const deLaterales = tareas.filter((t) => laterales.includes(t)).length;
   log(
-    `${vigentes.length} certificado(s) vigente(s) para subir` +
+    `${vigentes.length} certificado(s) en vigor (vigentes o por vencer) para subir` +
       (extra.length ? ` + ${extra.length} de Drive` : "") +
       (deLaterales ? ` + ${deLaterales} de EIN/inducción` : "")
   );
