@@ -36,6 +36,8 @@ import {
   cargoMasParecido,
   leerFila,
   personasPorRiesgo,
+  guardiaDe,
+  agruparPorGuardia,
   riesgosProblemaDe,
 } from "../shared/estados.js";
 import { CABECERA, INDICE, CODIGOS_RRCC, colCap, colVenc, colTipo, colEstado } from "../shared/rrcc.js";
@@ -781,4 +783,40 @@ test("las dos grafias de la foto en Drive apuntan al mismo documento", () => {
   // en la carpeta FOTOS conviven "4075286.png" y "04065624.png"
   assert.equal(normalizarDocumento("4075286"), normalizarDocumento("04075286"));
   assert.notEqual(normalizarDocumento("4075286"), normalizarDocumento("14075286"));
+});
+
+/* ---- guardia (sub-bloques del reporte por RRCC) ---- */
+
+test("guardiaDe: quita el prefijo GUARDIA, reconoce S/G y toma #N/A o vacio como sin dato", () => {
+  assert.equal(guardiaDe({ guardia: "a" }), "A");
+  assert.equal(guardiaDe({ guardia: " Guardia B " }), "B");
+  assert.equal(guardiaDe({ guardia: "S/G" }), "S/G");
+  assert.equal(guardiaDe({ guardia: "sin guardia" }), "S/G");
+  assert.equal(guardiaDe({ guardia: "#N/A" }), "", "error de formula de la hoja");
+  assert.equal(guardiaDe({ guardia: "" }), "");
+  assert.equal(guardiaDe({}), "");
+});
+
+test("agruparPorGuardia: A, B, C en orden, despues S/G y al final sin guardia, sin cambiar el orden de cada una", () => {
+  const items = [
+    { id: 1, persona: { guardia: "C" } },
+    { id: 2, persona: { guardia: "#N/A" } },
+    { id: 3, persona: { guardia: "A" } },
+    { id: 4, persona: { guardia: "S/G" } },
+    { id: 5, persona: { guardia: "GUARDIA A" } },
+    { id: 6, persona: { guardia: "" } },
+    { id: 7, persona: { guardia: "B" } },
+  ];
+  const grupos = agruparPorGuardia(items);
+  assert.deepEqual(
+    grupos.map((g) => [g.rotulo, g.items.map((it) => it.id)]),
+    [
+      ["GUARDIA A", [3, 5]],
+      ["GUARDIA B", [7]],
+      ["GUARDIA C", [1]],
+      ["SIN GUARDIA (S/G)", [4]],
+      ["GUARDIA NO REGISTRADA EN LA HOJA", [2, 6]],
+    ]
+  );
+  assert.deepEqual(agruparPorGuardia([]), []);
 });

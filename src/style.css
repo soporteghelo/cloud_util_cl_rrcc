@@ -274,6 +274,9 @@ h1 {
 /* va pegado al contador de personas, no al otro extremo del encabezado */
 .lnk-recargar { margin-left: 10px; }
 .lnk-recargar[hidden] { display: none; }
+/* lo mismo para "exportar pdf" de ESTADO TOTAL, junto a su contador */
+.lnk-junto { margin-left: 10px; }
+.lnk-junto[hidden] { display: none; }
 
 .panel-body { padding: 12px; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .panel-body-flush { padding: 0; flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
@@ -1634,17 +1637,15 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
 }
 
 /* tres columnas, una por RRCC, para ver todo de un vistazo sin scrollear tanto */
+/* Tantos cursos por fila como entren con al menos 560 px cada uno: con seis
+   columnas (DNI, cargo, area, nombre, estado, fecha) un bloque mas angosto
+   pisa el texto de una columna con la de al lado. A 1920 px entran dos; en
+   pantallas mas anchas, tres. */
 .estado-rrcc {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(min(560px, 100%), 1fr));
   gap: 14px;
   align-items: start;
-}
-@media (max-width: 1100px) {
-  .estado-rrcc { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 700px) {
-  .estado-rrcc { grid-template-columns: 1fr; }
 }
 
 .estado-grupo {
@@ -1700,26 +1701,28 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
 .estado-tabla td:nth-child(2) { white-space: normal; min-width: 90px; }
 .estado-tabla tbody tr:hover { background: rgba(34, 211, 238, 0.05); }
 
-/* Dentro de las 3 columnas de .estado-rrcc, una tabla en table-layout:auto
+/* Dentro de las columnas de .estado-rrcc, una tabla en table-layout:auto
    (el default) se estira hasta caber su celda mas ancha sin envolver texto
    (Cargo, nombres largos) y se sale de su columna de grid, pisando la de al
    lado. Con table-layout:fixed el ancho de cada columna queda fijo por lo
    que se declara aca (no por el contenido, ni por una fila con colspan):
    lo largo envuelve (Cargo y Nombres ya son white-space:normal mas abajo) en
-   vez de forzar la tabla. Con 5 columnas en el mismo ancho, letra e
+   vez de forzar la tabla. Con 6 columnas en el mismo ancho, letra e
    interlineado tambien se achican para que Estado y Fecha no se pisen. */
 .estado-grupo .estado-tabla { table-layout: fixed; font-size: 10px; }
 .estado-grupo .estado-tabla th,
 .estado-grupo .estado-tabla td { padding: 4px 6px; }
 .estado-grupo .estado-tabla th { font-size: 8.5px; }
 .estado-grupo .et-badge { padding: 1px 6px; font-size: 8.5px; }
-.estado-grupo .estado-tabla col.ec-dni    { width: 12%; }
-.estado-grupo .estado-tabla col.ec-cargo  { width: 25%; }
-.estado-grupo .estado-tabla col.ec-nombre { width: 27%; }
-.estado-grupo .estado-tabla col.ec-estado { width: 18%; }
-.estado-grupo .estado-tabla col.ec-fecha  { width: 18%; }
+.estado-grupo .estado-tabla col.ec-dni    { width: 11%; }
+.estado-grupo .estado-tabla col.ec-cargo  { width: 21%; }
+.estado-grupo .estado-tabla col.ec-area   { width: 12%; }
+.estado-grupo .estado-tabla col.ec-nombre { width: 24%; }
+.estado-grupo .estado-tabla col.ec-estado { width: 17%; }
+.estado-grupo .estado-tabla col.ec-fecha  { width: 15%; }
 .estado-grupo .estado-tabla td:nth-child(2),
-.estado-grupo .estado-tabla td:nth-child(3) { white-space: normal; min-width: 0; }
+.estado-grupo .estado-tabla td:nth-child(3),
+.estado-grupo .estado-tabla td:nth-child(4) { white-space: normal; min-width: 0; }
 
 /* Encabezados ordenables: clic (o Enter/Espacio, son role=button) reordena
    ese grupo por esa columna. La columna activa se resalta; la flechita de
@@ -1737,6 +1740,19 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
    .estado-grupo-head) y solo visible al imprimir: ver el bloque @media
    print para por que va dentro de <thead> en vez de ser un div aparte. */
 .estado-tabla-titulo { display: none; }
+
+/* Sub-bloque por guardia dentro de cada RRCC: un <tbody> por guardia, que
+   abre con esta fila (nombre de la guardia y cuantos hay). */
+.estado-grupo .estado-tabla .estado-guardia-titulo th {
+  padding: 8px 6px 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--cy);
+  background: rgba(34, 211, 238, 0.06);
+  border-bottom: 1px solid var(--line);
+}
+.estado-guardia-titulo th span { margin-left: 8px; font-weight: 400; color: var(--tx-dim); }
+.estado-tabla tbody tr.estado-guardia-titulo:hover { background: none; }
 
 .et-badge {
   display: inline-block;
@@ -1884,6 +1900,11 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 }
 .et-tipo-a { color: var(--cy); }
 .et-tipo-c { color: var(--tx-dim); }
+
+/* Filtro A / C del panel: dos botones que se marcan por separado; sin
+   ninguno marcado se ven todos los tipos. Dos columnas tambien en celular. */
+.et-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.et-tipos .btn[aria-pressed="true"] { border-color: var(--cy); color: var(--cy); background: rgba(34, 211, 238, 0.1); }
 
 /* ==========================================================================
    ESTADO TOTAL - informe por persona (vista previa de lo que se imprime)
@@ -2050,6 +2071,21 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
     text-transform: uppercase !important;
     text-align: left !important;
   }
+
+  /* el titulo de cada guardia no queda solo al pie de una hoja */
+  .estado-guardia-titulo { break-after: avoid; page-break-after: avoid; }
+  .estado-grupo .estado-tabla .estado-guardia-titulo th {
+    padding: 9px 4px 4px;
+    font-size: 11pt;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    color: #0a0a0a;
+    background: #ececef;
+    border-bottom: 1px solid #0a0a0a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .estado-guardia-titulo th span { color: #444; }
 
   #vista-estado .estado-grupo-head {
     font-size: 22pt !important;

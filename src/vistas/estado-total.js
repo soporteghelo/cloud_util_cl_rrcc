@@ -27,7 +27,7 @@ import {
   alCambiar,
 } from "../lib/datos.js";
 import { armarXlsx } from "../lib/excel.js";
-import { armarPdf, COLOR } from "../lib/pdf.js";
+import { armarPdf, armarPdfTabla, COLOR } from "../lib/pdf.js";
 import { armarPngTabla, TINTA } from "../lib/imagen.js";
 import { riesgosProblemaDe, aFormatoCorto, hoyIso } from "../../shared/estados.js";
 import { porCodigo } from "../../shared/rrcc.js";
@@ -64,28 +64,75 @@ function vencidosPorTipo(vencidos) {
 }
 
 /**
- * Las mismas columnas de la tabla de pantalla, en el mismo orden. Los anchos
- * son pixeles y se reparten tal cual: el DNI y los contadores son de tamano
- * fijo, y lo que puede crecer (nombre, cargo) se lleva el resto.
+ * Las mismas columnas de la tabla de pantalla, en el mismo orden, para la
+ * imagen y el PDF de la vista. Los anchos son pixeles de la imagen (el PDF
+ * los reparte en proporcion): el DNI y los contadores son de tamano fijo, y
+ * lo que puede crecer (nombre, cargo) se lleva el resto.
  */
-const COLUMNAS_IMAGEN = [
+const COLUMNAS_VISTA = [
   { titulo: "DNI", ancho: 92, valor: (f) => f.persona.dni || "—" },
   { titulo: "Apellidos y nombres", ancho: 295, valor: (f) => (f.persona.nombreCompleto || "—").toUpperCase() },
-  {
-    titulo: "Cargo / Área",
-    ancho: 340,
-    valor: (f) => [f.persona.cargo, f.persona.area].filter(Boolean).join(" · ").toUpperCase() || "—",
-  },
+  { titulo: "Cargo", ancho: 270, valor: (f) => (f.persona.cargo || "—").toUpperCase() },
+  { titulo: "Área", ancho: 120, valor: (f) => (f.persona.area || "—").toUpperCase() },
   { titulo: "Vencidos", ancho: 95, valor: (f) => f.vencidos.length, pastilla: () => TINTA.rojo },
   { titulo: "Por vencer", ancho: 105, valor: (f) => f.porVencer.length, pastilla: () => TINTA.ambar },
   {
     titulo: "Días",
     ancho: 200,
-    valor: (f) => textoDias(Number(f.persona.dias)),
+    valor: (f) => textoDias(f.dias),
     // los que ya vencieron, en rojo: es lo primero que se busca en la imagen
-    color: (f) => (Number(f.persona.dias) < 0 ? TINTA.rojo : TINTA.tinta),
+    color: (f) => (f.dias < 0 ? TINTA.rojo : TINTA.tinta),
   },
 ];
+
+/**
+ * Guardia de la hoja (columna `Guardia`: A, B, C... o S/G), sin el prefijo
+ * "GUARDIA" si alguien lo escribio, para que "A" y "GUARDIA A" caigan juntas.
+ */
+function guardiaDe(persona) {
+  const g = String(persona.guardia ?? "").trim().toUpperCase().replace(/^GUARDIA\s+/, "");
+  return ["SG", "SINGUARDIA"].includes(g.replace(/[^A-Z0-9]/g, "")) ? "S/G" : g;
+}
+
+/** "#N/A", "#REF!"...: la celda tiene una formula que fallo en la hoja. */
+const esErrorDeHoja = (g) => g.startsWith("#");
+
+/**
+ * S/G es quien no hace guardia. Una celda vacia o con error es un dato que
+ * falta, y va aparte y con nombre propio para que se note (igual que un RRCC
+ * sin tipo).
+ */
+function rotuloGuardia(g) {
+  if (!g) return "GUARDIA NO REGISTRADA EN LA HOJA";
+  if (esErrorDeHoja(g)) return `GUARDIA CON ERROR EN LA HOJA (${g})`;
+  return g === "S/G" ? "SIN GUARDIA (S/G)" : `GUARDIA ${g}`;
+}
+
+/** A, B, C... primero; despues S/G, los errores de la hoja y las vacias. */
+const pesoGuardia = (g) => (!g ? 3 : esErrorDeHoja(g) ? 2 : g === "S/G" ? 1 : 0);
+
+/**
+ * Las filas repartidas por guardia, en el orden de `pesoGuardia`. Dentro de
+ * cada grupo se respeta el orden de pantalla.
+ */
+function porGuardia(filas) {
+  const grupos = new Map();
+  for (const f of filas) {
+    const g = guardiaDe(f.persona);
+    if (!grupos.has(g)) grupos.set(g, []);
+    grupos.get(g).push(f);
+  }
+  const suma = (lista, campo) => lista.reduce((n, f) => n + f[campo].length, 0);
+  return [...grupos]
+    .sort(([a], [b]) => pesoGuardia(a) - pesoGuardia(b) || a.localeCompare(b, "es", { numeric: true }))
+    .map(([g, lista]) => ({
+      titulo: rotuloGuardia(g),
+      detalle:
+        `${lista.length} persona(s) · ${suma(lista, "vencidos")} RRCC vencido(s) · ` +
+        `${suma(lista, "porVencer")} por vencer`,
+      filas: lista,
+    }));
+}
 
 /**
  * Encabezados de la tabla de pantalla. Un clic en uno ordena por esa columna
@@ -94,14 +141,11 @@ const COLUMNAS_IMAGEN = [
 const COLUMNAS_TABLA = [
   { campo: "dni", texto: "DNI", valor: (f) => f.persona.dni || "" },
   { campo: "nombre", texto: "Nombre", valor: (f) => (f.persona.nombreCompleto || "").toUpperCase() },
-  {
-    campo: "cargo",
-    texto: "Cargo / Área",
-    valor: (f) => [f.persona.cargo, f.persona.area].filter(Boolean).join(" · ").toUpperCase(),
-  },
+  { campo: "cargo", texto: "Cargo", valor: (f) => (f.persona.cargo || "").toUpperCase() },
+  { campo: "area", texto: "Área", valor: (f) => (f.persona.area || "").toUpperCase() },
   { campo: "vencidos", texto: "Vencidos", valor: (f) => f.vencidos.length },
   { campo: "porVencer", texto: "Por vencer", valor: (f) => f.porVencer.length },
-  { campo: "dias", texto: "Días", valor: (f) => Number(f.persona.dias) || 0 },
+  { campo: "dias", texto: "Días", valor: (f) => f.dias || 0 },
 ];
 
 const COLUMNAS_DETALLE = [
@@ -153,9 +197,12 @@ export function montarEstadoTotal() {
     resultados: $("et-resultados"),
     recargar: $("et-recargar"),
     imagen: $("et-imagen"),
+    pdfVista: $("et-pdf-vista"),
+    tipos: [$("et-tipo-a"), $("et-tipo-c")],
   };
 
   let personas = [];
+  const tiposElegidos = new Set(); // "A" y/o "C"; vacio = todos los tipos
   let contexto = null;
   let descendente = false;
   let ordenColumna = null; // { campo, direccion } al hacer clic en un encabezado
@@ -364,17 +411,38 @@ export function montarEstadoTotal() {
   /* Tabla + dashboard                                                   */
   /* ------------------------------------------------------------------ */
 
-  function filaHtml({ persona, vencidos, porVencer }, indice) {
+  function filaHtml({ persona, vencidos, porVencer, dias }, indice) {
     return (
       `<tr class="et-fila" data-indice="${indice}" tabindex="0">` +
       `<td>${escaparHtml(persona.dni)}</td>` +
       `<td>${escaparHtml(persona.nombreCompleto) || "—"}</td>` +
-      `<td>${escaparHtml([persona.cargo, persona.area].filter(Boolean).join(" · ")) || "—"}</td>` +
+      `<td>${escaparHtml(persona.cargo) || "—"}</td>` +
+      `<td>${escaparHtml(persona.area) || "—"}</td>` +
       `<td><span class="et-badge et-vencido">${vencidos.length}</span></td>` +
       `<td><span class="et-badge et-actualizar">${porVencer.length}</span></td>` +
-      `<td>${textoDias(Number(persona.dias))}</td>` +
+      `<td>${textoDias(dias)}</td>` +
       `</tr>`
     );
+  }
+
+  /** "solo A", "solo C" o "solo A y C" segun el filtro de tipo; "" sin filtro. */
+  const textoTipos = () => (tiposElegidos.size ? `solo ${["A", "C"].filter((t) => tiposElegidos.has(t)).join(" y ")}` : "");
+
+  /**
+   * Con A y/o C marcados solo cuentan los RRCC de esos tipos (vencidos, por
+   * vencer y el detalle), y los dias salen del mas vencido de ellos: los de la
+   * hoja (FECHA MINIMA) pueden venir de un RRCC de otro tipo.
+   */
+  function soloTipos(fila) {
+    if (!tiposElegidos.size) return { ...fila, dias: Number(fila.persona.dias) };
+    const vale = (r) => tiposElegidos.has(tipoDe(r));
+    const vencidos = fila.vencidos.filter(vale);
+    return {
+      ...fila,
+      vencidos,
+      porVencer: fila.porVencer.filter(vale),
+      dias: vencidos.length ? vencidos[0].dias : Number(fila.persona.dias),
+    };
   }
 
   function pintar() {
@@ -394,11 +462,13 @@ export function montarEstadoTotal() {
           !textoFiltro ||
           [p.nombreCompleto, p.dni, p.area, p.cargo].some((v) => String(v || "").toUpperCase().includes(textoFiltro))
       )
-      .map((persona) => ({ persona, ...riesgosProblemaDe(persona, { umbrales }) }));
+      .map((persona) => soloTipos({ persona, ...riesgosProblemaDe(persona, { umbrales }) }))
+      // con el filtro de tipo, solo quien tiene vencido algo de ese tipo
+      .filter((f) => !tiposElegidos.size || f.vencidos.length);
 
     const porDias = (a, b) => {
-      const da = Number(a.persona.dias) || 0;
-      const db = Number(b.persona.dias) || 0;
+      const da = a.dias || 0;
+      const db = b.dias || 0;
       return descendente ? db - da : da - db;
     };
     const clave = ordenColumna && COLUMNAS_TABLA.find((c) => c.campo === ordenColumna.campo)?.valor;
@@ -439,10 +509,12 @@ export function montarEstadoTotal() {
     el.dashVencidos.textContent = String(totalVencidos);
     el.dashPorVencer.textContent = String(totalPorVencer);
 
-    el.resCount.textContent = personas.length ? `${filas.length} persona(s) vencida(s)` : "";
+    const tipos = textoTipos();
+    el.resCount.textContent = personas.length ? `${filas.length} persona(s) vencida(s)${tipos ? ` · ${tipos}` : ""}` : "";
     el.pdf.disabled = filas.length === 0;
     el.excel.disabled = filas.length === 0;
     el.imagen.disabled = filas.length === 0;
+    el.pdfVista.hidden = filas.length === 0;
   }
 
   /* ------------------------------------------------------------------ */
@@ -467,9 +539,11 @@ export function montarEstadoTotal() {
   /** Texto del encabezado del informe, con el filtro puesto si lo hay. */
   function subtituloInforme(lista) {
     const filtro = el.buscar.value.trim();
+    const tipos = textoTipos();
     return (
       `${lista.length} persona(s) activa(s) con al menos un RRCC vencido · ` +
       `ordenado por apellidos · ${aFormatoCorto(hoyIso())}` +
+      (tipos ? ` · ${tipos}` : "") +
       (filtro ? ` · filtro: ${filtro.toUpperCase()}` : "")
     );
   }
@@ -630,39 +704,72 @@ export function montarEstadoTotal() {
    * lo que evita bajar 1.5 MB para mostrar unas pocas decenas de personas.
    */
   /**
-   * La tabla entera como PNG sobre fondo claro.
-   *
-   * Sale lo mismo que se esta viendo (mismo filtro, mismo orden) pero con
-   * TODAS las filas, no solo las que caben en el scroll, para poder pegarla en
-   * un mensaje sin adjuntar un archivo que haya que abrir.
+   * La vista tal como se ve (totales + tabla, mismo filtro y mismo orden) pero
+   * con TODAS las filas, no solo las que caben en el scroll: lo que reciben
+   * tanto la imagen como el PDF de la vista.
+   */
+  function vistaParaExportar() {
+    const filtro = el.buscar.value.trim();
+    const tipos = textoTipos();
+    return {
+      titulo: TITULO_INFORME,
+      subtitulo:
+        `${filas.length} persona(s) con ESTADO_FINAL = VENCIDO y activas · al ${aFormatoCorto(hoyIso())}` +
+        (tipos ? ` · ${tipos}` : "") +
+        (filtro ? ` · filtro "${filtro}"` : ""),
+      tarjetas: [
+        { numero: filas.length, rotulo: "personas vencidas" },
+        { numero: filas.reduce((n, f) => n + f.vencidos.length, 0), rotulo: "RRCC vencidos", color: TINTA.rojo },
+        { numero: filas.reduce((n, f) => n + f.porVencer.length, 0), rotulo: "RRCC por vencer", color: TINTA.ambar },
+      ],
+      columnas: COLUMNAS_VISTA,
+      filas,
+      pie: `AESA · U.M. Cerro Lindo · generado desde BD AESA el ${aFormatoCorto(hoyIso())}`,
+    };
+  }
+
+  /**
+   * La tabla entera como PNG sobre fondo claro, para poder pegarla en un
+   * mensaje sin adjuntar un archivo que haya que abrir.
    */
   async function exportarImagen() {
     if (!filas.length) return;
     const nombre = `ESTADO TOTAL ${hoyIso()}.png`;
     el.imagen.disabled = true;
     try {
-      const filtro = el.buscar.value.trim();
-      const png = await armarPngTabla({
-        titulo: TITULO_INFORME,
-        subtitulo:
-          `${filas.length} persona(s) con ESTADO_FINAL = VENCIDO y activas · al ${aFormatoCorto(hoyIso())}` +
-          (filtro ? ` · filtro "${filtro}"` : ""),
-        tarjetas: [
-          { numero: filas.length, rotulo: "personas vencidas" },
-          { numero: filas.reduce((n, f) => n + f.vencidos.length, 0), rotulo: "RRCC vencidos", color: TINTA.rojo },
-          { numero: filas.reduce((n, f) => n + f.porVencer.length, 0), rotulo: "RRCC por vencer", color: TINTA.ambar },
-        ],
-        columnas: COLUMNAS_IMAGEN,
-        filas,
-        pie: `AESA · U.M. Cerro Lindo · generado desde BD AESA el ${aFormatoCorto(hoyIso())}`,
-      });
-      descargarBlob(png, nombre);
+      descargarBlob(await armarPngTabla(vistaParaExportar()), nombre);
       consola(`${filas.length} persona(s) exportadas a ${nombre}`, "ok");
     } catch (e) {
       consola(`no se pudo generar la imagen: ${e.message}`, "err");
       notificar("No se pudo generar la imagen", e.message, "warn");
     } finally {
       el.imagen.disabled = filas.length === 0;
+    }
+  }
+
+  /**
+   * La misma vista en PDF (A4 apaisado, fondo claro), agrupada por guardia:
+   * cada guardia con su banda y sus totales, en el orden de pantalla. A
+   * diferencia del PDF del boton de abajo —el informe detallado por persona—
+   * este es la tabla tal cual, y a diferencia de la imagen no tiene tope de
+   * filas: se reparte en hojas repitiendo el encabezado.
+   */
+  async function exportarPdfVista() {
+    if (!filas.length) return;
+    const nombre = `ESTADO TOTAL ${hoyIso()} - TABLA.pdf`;
+    el.pdfVista.disabled = true;
+    try {
+      const vista = vistaParaExportar();
+      descargarBlob(
+        await armarPdfTabla({ ...vista, subtitulo: `${vista.subtitulo} · por guardia`, grupos: porGuardia(filas) }),
+        nombre
+      );
+      consola(`${filas.length} persona(s) exportadas a ${nombre}`, "ok");
+    } catch (e) {
+      consola(`no se pudo exportar el PDF: ${e.message}`, "err");
+      notificar("No se pudo exportar", e.message, "warn");
+    } finally {
+      el.pdfVista.disabled = false;
     }
   }
 
@@ -739,7 +846,16 @@ export function montarEstadoTotal() {
   });
   el.excel.addEventListener("click", exportarExcel);
   el.imagen.addEventListener("click", exportarImagen);
+  el.pdfVista.addEventListener("click", exportarPdfVista);
   el.buscar.addEventListener("input", pintar);
+  for (const boton of el.tipos) {
+    boton.addEventListener("click", () => {
+      const tipo = boton.dataset.tipo;
+      if (!tiposElegidos.delete(tipo)) tiposElegidos.add(tipo);
+      boton.setAttribute("aria-pressed", String(tiposElegidos.has(tipo)));
+      pintar();
+    });
+  }
   el.orden.addEventListener("click", () => {
     descendente = !descendente;
     ordenColumna = null; // el orden por urgencia vuelve a mandar

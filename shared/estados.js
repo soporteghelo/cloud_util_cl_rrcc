@@ -952,6 +952,43 @@ export function personasPorRiesgo(personas, opciones = {}) {
 }
 
 /**
+ * Guardia de una persona (columna `Guardia`: A, B, C... o S/G), sin el
+ * prefijo "GUARDIA" si alguien lo escribio, para que "A" y "GUARDIA A" caigan
+ * juntas. "" = la hoja no la tiene: celda vacia, o un error de formula como
+ * "#N/A" (la columna sale de una busqueda y hay filas donde no encuentra).
+ */
+export function guardiaDe(persona) {
+  const g = String(persona?.guardia ?? "").trim().toUpperCase();
+  if (!g || g.startsWith("#")) return "";
+  const sinPrefijo = g.replace(/^GUARDIA\s+/, "");
+  return ["SG", "SINGUARDIA"].includes(sinPrefijo.replace(/[^A-Z0-9]/g, "")) ? "S/G" : sinPrefijo;
+}
+
+/** S/G es quien no hace guardia; sin guardia en la hoja es un dato que falta. */
+export const rotuloGuardia = (g) =>
+  !g ? "GUARDIA NO REGISTRADA EN LA HOJA" : g === "S/G" ? "SIN GUARDIA (S/G)" : `GUARDIA ${g}`;
+
+/**
+ * Reparte `items` por guardia: A, B, C... en orden, despues S/G y al final
+ * los que no tienen guardia en la hoja. Dentro de cada guardia se respeta el
+ * orden en que llegaron (el del reporte: por dias, o el de la columna que se
+ * ordeno). `personaDe(item)` dice de quien es cada item.
+ * Devuelve [{ guardia, rotulo, items }].
+ */
+export function agruparPorGuardia(items, personaDe = (it) => it.persona) {
+  const grupos = new Map();
+  for (const it of items || []) {
+    const g = guardiaDe(personaDe(it));
+    if (!grupos.has(g)) grupos.set(g, []);
+    grupos.get(g).push(it);
+  }
+  const peso = (g) => (!g ? 2 : g === "S/G" ? 1 : 0);
+  return [...grupos]
+    .sort(([a], [b]) => peso(a) - peso(b) || a.localeCompare(b, "es", { numeric: true }))
+    .map(([guardia, lista]) => ({ guardia, rotulo: rotuloGuardia(guardia), items: lista }));
+}
+
+/**
  * RRCC de UNA persona que estan vencidos o por vencer (ACTUALIZAR), para el
  * detalle que se muestra al hacer clic sobre alguien en el reporte de
  * "estado total". Igual que `personasPorRiesgo`, recalcula el estado con

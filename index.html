@@ -520,6 +520,30 @@
                   para ver el detalle de qué RRCC tiene vencido y/o por vencer.
                 </div>
               </div>
+
+              <label class="lbl">Tipo de RRCC</label>
+              <div class="et-tipos" role="group" aria-label="Filtrar por tipo de RRCC">
+                <button
+                  class="btn btn-ghost"
+                  id="et-tipo-a"
+                  type="button"
+                  data-tipo="A"
+                  aria-pressed="false"
+                  title="Solo los RRCC tipo A (autorizados). Otro clic lo quita; sin marcar se ven todos"
+                >
+                  A · AUTORIZADOS
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  id="et-tipo-c"
+                  type="button"
+                  data-tipo="C"
+                  aria-pressed="false"
+                  title="Solo los RRCC tipo C (capacitados). Otro clic lo quita; sin marcar se ven todos"
+                >
+                  C · CAPACITADOS
+                </button>
+              </div>
             </div>
           </section>
 
@@ -567,6 +591,15 @@
             <div class="panel-head">
               <h2>02 · ESTADO TOTAL</h2>
               <span class="count" id="et-res-count"></span>
+              <button
+                class="lnk lnk-junto"
+                id="et-pdf-vista"
+                type="button"
+                title="Descargar en PDF esta vista (totales y la tabla con todas sus filas, agrupada por guardia), sobre fondo claro"
+                hidden
+              >
+                ⤓ exportar pdf
+              </button>
             </div>
             <div class="panel-body panel-body-scroll et-body">
               <div class="et-dash" id="et-dash" hidden>

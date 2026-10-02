@@ -28,7 +28,7 @@ import {
   alCambiar,
 } from "../lib/datos.js";
 import { armarXlsx } from "../lib/excel.js";
-import { personasPorRiesgo, aFormatoCorto, aIso, hoyIso } from "../../shared/estados.js";
+import { personasPorRiesgo, agruparPorGuardia, guardiaDe, aFormatoCorto, aIso, hoyIso } from "../../shared/estados.js";
 import { RRCC } from "../../shared/rrcc.js";
 
 const CLASE_ESTADO = {
@@ -44,6 +44,7 @@ const RANGO_ESTADO = { VENCIDO: 0, ACTUALIZAR: 1, VIGENTE: 2, "NO APLICA": 3 };
 const COLUMNAS = [
   { campo: "dni", texto: "DNI", valor: (it) => it.persona.dni || "" },
   { campo: "cargo", texto: "Cargo", valor: (it) => (it.persona.cargo || "").toUpperCase() },
+  { campo: "area", texto: "Área", valor: (it) => (it.persona.area || "").toUpperCase() },
   { campo: "nombre", texto: "Apellidos y Nombres", valor: (it) => (it.persona.nombreCompleto || "").toUpperCase() },
   { campo: "estado", texto: "Estado", valor: (it) => RANGO_ESTADO[it.estado] ?? 99 },
   { campo: "fecha", texto: "F. Vencimiento", valor: (it) => it.riesgo.venc || "" },
@@ -51,13 +52,15 @@ const COLUMNAS = [
 
 /**
  * Columnas del Excel exportado: las cinco que se ven en pantalla mas el RRCC
- * (impreso es el titulo de cada tabla, pero en una hoja plana tiene que ir en
- * cada fila para poder filtrar) y los dias que faltan, que ya estan
- * calculados y son lo primero por lo que se suele ordenar.
+ * y la guardia (impresos son el titulo de cada tabla y de cada sub-bloque,
+ * pero en una hoja plana tienen que ir en cada fila para poder filtrar) y los
+ * dias que faltan, que ya estan calculados y son lo primero por lo que se
+ * suele ordenar.
  */
 const COLUMNAS_EXCEL = [
   { titulo: "RRCC", ancho: 7, valor: (it, g) => g.codigo },
   { titulo: "RIESGO CRITICO", ancho: 32, valor: (it, g) => g.nombre },
+  { titulo: "GUARDIA", ancho: 10, valor: (it) => guardiaDe(it.persona) },
   { titulo: "DNI", ancho: 12, valor: (it) => it.persona.dni || "" },
   { titulo: "CARGO", ancho: 30, valor: (it) => (it.persona.cargo || "").toUpperCase() },
   { titulo: "APELLIDOS Y NOMBRES", ancho: 34, valor: (it) => (it.persona.nombreCompleto || "").toUpperCase() },
@@ -130,19 +133,32 @@ export function montarEstado() {
 
   function htmlDeGrupo(grupo, vencHasta) {
     const orden = ordenPorGrupo.get(grupo.codigo);
-    const filas = itemsDelGrupo(grupo)
-      .map(({ persona, riesgo, estado }) => {
-        const clase = CLASE_ESTADO[estado] || "et-noaplica";
-        return (
-          `<tr class="${clase}">` +
-          `<td>${escaparHtml(persona.dni)}</td>` +
-          `<td>${escaparHtml(persona.cargo) || "—"}</td>` +
-          `<td>${escaparHtml(persona.nombreCompleto)}</td>` +
-          `<td><span class="et-badge ${clase}">${estado}</span></td>` +
-          `<td>${aFormatoCorto(riesgo.venc) || "—"}</td>` +
-          `</tr>`
-        );
-      })
+    const filaHtml = ({ persona, riesgo, estado }) => {
+      const clase = CLASE_ESTADO[estado] || "et-noaplica";
+      return (
+        `<tr class="${clase}">` +
+        `<td>${escaparHtml(persona.dni)}</td>` +
+        `<td>${escaparHtml(persona.cargo) || "—"}</td>` +
+        `<td>${escaparHtml(persona.area) || "—"}</td>` +
+        `<td>${escaparHtml(persona.nombreCompleto)}</td>` +
+        `<td><span class="et-badge ${clase}">${estado}</span></td>` +
+        `<td>${aFormatoCorto(riesgo.venc) || "—"}</td>` +
+        `</tr>`
+      );
+    };
+    // Dentro del curso, un sub-bloque por guardia (A, B, C, S/G y al final
+    // quien no la tiene en la hoja), cada uno con su titulo y su cuenta. Es
+    // un <tbody> por guardia: la tabla sigue siendo una sola, asi que las
+    // columnas no cambian de ancho entre guardias y el <thead> con el titulo
+    // del curso se sigue repitiendo en cada hoja impresa.
+    const cuerpos = agruparPorGuardia(itemsDelGrupo(grupo))
+      .map(
+        (sub) =>
+          `<tbody class="estado-guardia">` +
+          `<tr class="estado-guardia-titulo"><th colspan="${COLUMNAS.length}">${escaparHtml(sub.rotulo)}<span>${sub.items.length}</span></th></tr>` +
+          sub.items.map(filaHtml).join("") +
+          `</tbody>`
+      )
       .join("");
 
     // Los <th> del encabezado ordenan al hacer clic (delegado en el
@@ -163,7 +179,7 @@ export function montarEstado() {
     // El ancho de columna se fija con <colgroup> (no con el width de cada
     // <th>): la fila de titulo de arriba tiene un solo <th colspan> y, sin
     // colgroup, un motor de tablas puede tomar ESA fila como referencia para
-    // repartir columnas en table-layout:fixed y arruinar el ancho de las 4.
+    // repartir columnas en table-layout:fixed y arruinar el ancho de las demas.
     // El corte por fecha va en el titulo que se imprime: en pantalla se ve en
     // el contador de arriba, pero la hoja impresa tiene que decir por si sola
     // hasta que fecha esta recortada la lista.
@@ -173,11 +189,11 @@ export function montarEstado() {
       `<section class="estado-grupo">` +
       `<div class="estado-grupo-head"><b>${grupo.codigo} · ${escaparHtml(grupo.nombre)}</b><span>${grupo.items.length}</span></div>` +
       `<table class="estado-tabla" data-codigo="${grupo.codigo}">` +
-      `<colgroup><col class="ec-dni" /><col class="ec-cargo" /><col class="ec-nombre" /><col class="ec-estado" /><col class="ec-fecha" /></colgroup>` +
+      `<colgroup><col class="ec-dni" /><col class="ec-cargo" /><col class="ec-area" /><col class="ec-nombre" /><col class="ec-estado" /><col class="ec-fecha" /></colgroup>` +
       `<thead>` +
       `<tr class="estado-tabla-titulo"><th colspan="${COLUMNAS.length}">${grupo.codigo} · ${escaparHtml(grupo.nombre)} (${grupo.items.length})${corte}</th></tr>` +
       `<tr>${encabezado}</tr>` +
-      `</thead><tbody>${filas}</tbody></table>` +
+      `</thead>${cuerpos}</table>` +
       `</section>`
     );
   }
@@ -246,13 +262,14 @@ export function montarEstado() {
 
   /**
    * Exporta a .xlsx lo mismo que saldria por la impresora: los grupos que
-   * estan a la vista, en su orden, con los filtros ya aplicados. Va todo a
-   * UNA hoja (con la columna RRCC) en vez de una hoja por riesgo: asi se
-   * puede filtrar, ordenar y hacer tablas dinamicas sobre el conjunto.
+   * estan a la vista, en su orden (por guardia dentro de cada RRCC), con los
+   * filtros ya aplicados. Va todo a UNA hoja (con las columnas RRCC y
+   * GUARDIA) en vez de una hoja por riesgo: asi se puede filtrar, ordenar y
+   * hacer tablas dinamicas sobre el conjunto.
    */
   async function exportar() {
     const filas = visible.grupos.flatMap((g) =>
-      itemsDelGrupo(g).map((it) => COLUMNAS_EXCEL.map((c) => c.valor(it, g)))
+      agruparPorGuardia(itemsDelGrupo(g)).flatMap((sub) => sub.items.map((it) => COLUMNAS_EXCEL.map((c) => c.valor(it, g))))
     );
     if (!filas.length) return;
 

@@ -19,6 +19,8 @@
 
 /** A4 vertical, en puntos (1 pt = 1/72"). */
 const PAGINA = { ancho: 595.28, alto: 841.89 };
+/** A4 apaisado: el listado de ESTADO TOTAL es ancho, como en pantalla. */
+const APAISADA = { ancho: PAGINA.alto, alto: PAGINA.ancho };
 const MARGEN = { izq: 40, der: 40, arriba: 44, abajo: 44 };
 const ANCHO_UTIL = PAGINA.ancho - MARGEN.izq - MARGEN.der;
 
@@ -34,6 +36,8 @@ export const COLOR = {
   banda: [0.925, 0.925, 0.935], // fondo de la cabecera de cada persona
   cebra: [0.973, 0.973, 0.978], // fondo alterno de las filas
   linea: [0.78, 0.78, 0.8],
+  papel: [0.957, 0.961, 0.969], // tarjetas y cabecera de la tabla
+  acento: [0.055, 0.455, 0.565], // el cian de la app, oscurecido para que se lea sobre blanco
 };
 
 /**
@@ -121,9 +125,17 @@ function literal(texto) {
 
 const FUENTE = { normal: "/F1", negrita: "/F2" };
 
-/** Un color puede venir como [r,g,b] o como un gris suelto. */
+/**
+ * Un color puede venir como [r,g,b], como un gris suelto o como "#rrggbb":
+ * asi las columnas de la imagen (`TINTA` de imagen.js) sirven tal cual aqui.
+ */
 function tinta(color) {
-  const c = Array.isArray(color) ? color : [color ?? 0, color ?? 0, color ?? 0];
+  const hex = typeof color === "string" && /^#([0-9a-f]{6})$/i.exec(color);
+  const c = hex
+    ? [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16) / 255)
+    : Array.isArray(color)
+      ? color
+      : [color ?? 0, color ?? 0, color ?? 0];
   return c.map((v) => Number(v).toFixed(3)).join(" ");
 }
 
@@ -139,6 +151,65 @@ const opLinea = (x1, y1, x2, y2, color = COLOR.linea, grosor = 0.6) =>
 
 const opRecuadro = (x, y, ancho, alto, color = COLOR.banda) =>
   `${tinta(color)} rg ${x.toFixed(2)} ${y.toFixed(2)} ${ancho.toFixed(2)} ${alto.toFixed(2)} re f`;
+
+/** Contorno de un recuadro (sin relleno). */
+const opMarco = (x, y, ancho, alto, color = COLOR.linea, grosor = 0.6) =>
+  `${tinta(color)} RG ${grosor} w ${x.toFixed(2)} ${y.toFixed(2)} ${ancho.toFixed(2)} ${alto.toFixed(2)} re S`;
+
+/**
+ * Contorno con los extremos redondos: las pastillas de VENCIDOS / POR
+ * VENCER. Cada esquina es un cuarto de circulo aproximado con una Bezier.
+ */
+function opPastilla(x, y, ancho, alto, color, grosor = 0.7) {
+  const r = alto / 2;
+  const k = r * 0.5523;
+  const n = (v) => v.toFixed(2);
+  const [x1, y1, x2, y2] = [x, y, x + ancho, y + alto];
+  return (
+    `${tinta(color)} RG ${grosor} w ` +
+    `${n(x1 + r)} ${n(y1)} m ${n(x2 - r)} ${n(y1)} l ` +
+    `${n(x2 - r + k)} ${n(y1)} ${n(x2)} ${n(y1 + r - k)} ${n(x2)} ${n(y1 + r)} c ` +
+    `${n(x2)} ${n(y2 - r + k)} ${n(x2 - r + k)} ${n(y2)} ${n(x2 - r)} ${n(y2)} c ` +
+    `${n(x1 + r)} ${n(y2)} l ` +
+    `${n(x1 + r - k)} ${n(y2)} ${n(x1)} ${n(y2 - r + k)} ${n(x1)} ${n(y1 + r)} c ` +
+    `${n(x1)} ${n(y1 + r - k)} ${n(x1 + r - k)} ${n(y1)} ${n(x1 + r)} ${n(y1)} c h S`
+  );
+}
+
+/**
+ * Titulo, subtitulo y la regla roja con que empieza cada hoja. Devuelve la
+ * altura donde sigue el contenido.
+ */
+function encabezarHoja(ops, hoja, titulo, subtitulo) {
+  const util = hoja.ancho - MARGEN.izq - MARGEN.der;
+  let y = hoja.alto - MARGEN.arriba;
+  if (titulo) {
+    ops.push(opTexto(recortar(titulo, 15, util, true), MARGEN.izq, y - 12, 15, { negrita: true }));
+    y -= 17;
+  }
+  if (subtitulo) {
+    ops.push(opTexto(recortar(subtitulo, 8.5, util), MARGEN.izq, y - 8, 8.5, { color: COLOR.gris }));
+    y -= 12;
+  }
+  // regla gruesa en rojo: el informe va de vencimientos, y ademas separa
+  // la cabecera del listado de un vistazo
+  ops.push(opLinea(MARGEN.izq, y, hoja.ancho - MARGEN.der, y, COLOR.rojo, 1.6));
+  return y - 14;
+}
+
+/** Pie con la numeracion, ya sabiendo cuantas hojas salieron. */
+function numerarHojas(paginas, hoja, izquierda) {
+  paginas.forEach((pagina, i) => {
+    const texto = `Página ${i + 1} de ${paginas.length}`;
+    const x = hoja.ancho - MARGEN.der - anchoTexto(texto, 8);
+    pagina.push(opLinea(MARGEN.izq, MARGEN.abajo - 6, hoja.ancho - MARGEN.der, MARGEN.abajo - 6));
+    pagina.push(opTexto(texto, x, MARGEN.abajo - 16, 8, { color: COLOR.gris }));
+    if (izquierda) {
+      const hueco = Math.min(320, x - MARGEN.izq - 20);
+      pagina.push(opTexto(recortar(izquierda, 8, hueco), MARGEN.izq, MARGEN.abajo - 16, 8, { color: COLOR.gris }));
+    }
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* API publica                                                         */
@@ -169,19 +240,7 @@ export async function armarPdf({ titulo = "", subtitulo = "", bloques = [] } = {
   function nuevaPagina() {
     ops = [];
     paginas.push(ops);
-    y = PAGINA.alto - MARGEN.arriba;
-    if (titulo) {
-      ops.push(opTexto(recortar(titulo, 15, ANCHO_UTIL, true), MARGEN.izq, y - 12, 15, { negrita: true }));
-      y -= 17;
-    }
-    if (subtitulo) {
-      ops.push(opTexto(recortar(subtitulo, 8.5, ANCHO_UTIL), MARGEN.izq, y - 8, 8.5, { color: COLOR.gris }));
-      y -= 12;
-    }
-    // regla gruesa en rojo: el informe va de vencimientos, y ademas separa
-    // la cabecera del listado de un vistazo
-    ops.push(opLinea(MARGEN.izq, y, PAGINA.ancho - MARGEN.der, y, COLOR.rojo, 1.6));
-    y -= 14;
+    y = encabezarHoja(ops, PAGINA, titulo, subtitulo);
   }
 
   /** Alto que ocupa un bloque, para decidir si cabe en lo que queda de hoja. */
@@ -279,20 +338,184 @@ export async function armarPdf({ titulo = "", subtitulo = "", bloques = [] } = {
     }
   }
 
-  // pie con la numeracion, ya sabiendo cuantas hojas salieron
-  paginas.forEach((pagina, i) => {
-    const texto = `Página ${i + 1} de ${paginas.length}`;
-    const x = PAGINA.ancho - MARGEN.der - anchoTexto(texto, 8);
-    pagina.push(opLinea(MARGEN.izq, MARGEN.abajo - 6, PAGINA.ancho - MARGEN.der, MARGEN.abajo - 6));
-    pagina.push(opTexto(texto, x, MARGEN.abajo - 16, 8, { color: COLOR.gris }));
-    if (titulo) pagina.push(opTexto(recortar(titulo, 8, 320), MARGEN.izq, MARGEN.abajo - 16, 8, { color: COLOR.gris }));
+  numerarHojas(paginas, PAGINA, titulo);
+  return new Blob([serializar(paginas, PAGINA)], { type: "application/pdf" });
+}
+
+/** Medidas del listado, en puntos (ver `armarPdfTabla`). */
+const TABLA = { tarjeta: 44, cabecera: 19, grupo: 19, hueco: 7, fila: 17, letra: 8.5, relleno: 7 };
+
+/**
+ * La tabla de una vista tal como se ve en pantalla, pero sobre blanco y con
+ * TODAS las filas: el equivalente en PDF de `armarPngTabla` (imagen.js), con
+ * los mismos argumentos para que una vista le pase las mismas columnas a los
+ * dos.
+ *
+ *   titulo, subtitulo  cabecera, repetida en cada hoja
+ *   tarjetas   [{ numero, rotulo, color }] los totales; solo en la primera hoja
+ *   columnas   [{ titulo, ancho, alinear, valor(fila), pastilla, color, negrita }]
+ *              `ancho` es proporcional: se reparte el ancho util de la hoja
+ *   filas      los datos, ya filtrados y ordenados como se ven en pantalla
+ *   grupos     opcional, en lugar de `filas`: [{ titulo, detalle, filas }]
+ *              cada grupo abre con una banda (titulo a la izquierda, detalle
+ *              a la derecha) y sus filas debajo
+ *   pie        texto del pie de cada hoja, junto a la numeracion
+ *
+ * A diferencia de la imagen no tiene tope de filas: al pasar de hoja se
+ * repite el encabezado de la tabla, y tambien la banda del grupo que quedo a
+ * medias. Una banda nunca se queda sola al pie: se lleva su primera fila.
+ */
+export async function armarPdfTabla({
+  titulo = "",
+  subtitulo = "",
+  tarjetas = [],
+  columnas,
+  filas = [],
+  grupos = null,
+  pie = "",
+} = {}) {
+  if (!columnas?.length) throw new Error("el PDF necesita columnas");
+
+  const hoja = APAISADA;
+  const util = hoja.ancho - MARGEN.izq - MARGEN.der;
+  const escala = util / columnas.reduce((n, c) => n + c.ancho, 0);
+  let borde = MARGEN.izq;
+  const cols = columnas.map((c) => {
+    const col = { ...c, x: borde, ancho: c.ancho * escala };
+    borde += col.ancho;
+    return col;
   });
 
-  return new Blob([serializar(paginas)], { type: "application/pdf" });
+  const paginas = [];
+  let ops = null;
+  let y = 0;
+  let enCabecera = false; // lo ultimo dibujado es el encabezado de la tabla
+
+  /** x donde empieza un texto de `ancho` dentro de la columna, segun su alineacion. */
+  const alinear = (col, ancho) =>
+    col.alinear === "center"
+      ? col.x + (col.ancho - ancho) / 2
+      : col.alinear === "right"
+        ? col.x + col.ancho - TABLA.relleno - ancho
+        : col.x + TABLA.relleno;
+
+  function encabezadoTabla() {
+    const alto = TABLA.cabecera;
+    ops.push(opRecuadro(MARGEN.izq, y - alto, util, alto, COLOR.papel));
+    for (const col of cols) {
+      const t = recortar(String(col.titulo).toUpperCase(), 7.5, col.ancho - TABLA.relleno * 2, true);
+      ops.push(opTexto(t, alinear(col, anchoTexto(t, 7.5, true)), y - alto + 6.5, 7.5, { negrita: true, color: COLOR.acento }));
+    }
+    ops.push(opLinea(MARGEN.izq, y - alto, MARGEN.izq + util, y - alto, COLOR.linea, 0.8));
+    y -= alto;
+    enCabecera = true;
+  }
+
+  function nuevaPagina() {
+    ops = [];
+    paginas.push(ops);
+    y = encabezarHoja(ops, hoja, titulo, subtitulo);
+  }
+
+  nuevaPagina();
+
+  if (tarjetas.length) {
+    const hueco = 8;
+    const ancho = (util - hueco * (tarjetas.length - 1)) / tarjetas.length;
+    const alto = TABLA.tarjeta;
+    tarjetas.forEach((t, i) => {
+      const x = MARGEN.izq + i * (ancho + hueco);
+      const color = t.color || COLOR.tinta;
+      ops.push(opRecuadro(x, y - alto, ancho, alto, COLOR.papel));
+      ops.push(opMarco(x, y - alto, ancho, alto));
+      // la pestaña de color de la izquierda, igual que en pantalla
+      ops.push(opRecuadro(x, y - alto, 2.5, alto, color));
+      ops.push(opTexto(String(t.numero), x + 11, y - 21, 18, { negrita: true, color }));
+      ops.push(opTexto(recortar(String(t.rotulo).toUpperCase(), 7, ancho - 18), x + 11, y - 35, 7, { color: COLOR.gris }));
+    });
+    y -= alto + 12;
+  }
+
+  /**
+   * Banda del grupo: pestaña de color, nombre en negrita y el detalle a la
+   * derecha. Si el grupo viene de la hoja anterior lo dice, para que una hoja
+   * suelta se entienda sin la de antes.
+   */
+  function bandaGrupo(grupo, sigue) {
+    if (!enCabecera) y -= TABLA.hueco; // aire entre el grupo anterior y este
+    const alto = TABLA.grupo;
+    const base = y - alto;
+    ops.push(opRecuadro(MARGEN.izq, base, util, alto, COLOR.banda));
+    ops.push(opRecuadro(MARGEN.izq, base, 3, alto, COLOR.acento));
+    const detalle = String(grupo.detalle || "");
+    const anchoDetalle = detalle ? anchoTexto(detalle, 8) : 0;
+    const texto = `${grupo.titulo}${sigue ? " (continuación)" : ""}`;
+    const hueco = util - 14 - (anchoDetalle ? anchoDetalle + 20 : 0);
+    ops.push(opTexto(recortar(texto, 9.5, hueco, true), MARGEN.izq + 11, base + 6, 9.5, { negrita: true }));
+    if (detalle) {
+      ops.push(opTexto(detalle, MARGEN.izq + util - 8 - anchoDetalle, base + 6.3, 8, { color: COLOR.gris }));
+    }
+    y = base;
+    enCabecera = false;
+  }
+
+  function fila(datos, i) {
+    const base = y - TABLA.fila;
+    if (i % 2) ops.push(opRecuadro(MARGEN.izq, base, util, TABLA.fila, COLOR.cebra));
+
+    for (const col of cols) {
+      const valor = col.valor(datos, i);
+      if (col.pastilla) {
+        const t = String(valor);
+        const anchoT = anchoTexto(t, 7.5, true);
+        const ancho = Math.max(17, anchoT + 10);
+        const alto = 11;
+        const x = col.x + (col.ancho - ancho) / 2;
+        const color = col.pastilla(datos, valor) || COLOR.gris;
+        ops.push(opPastilla(x, base + (TABLA.fila - alto) / 2, ancho, alto, color));
+        ops.push(opTexto(t, x + (ancho - anchoT) / 2, base + 6.2, 7.5, { negrita: true, color }));
+      } else {
+        const t = recortar(valor, TABLA.letra, col.ancho - TABLA.relleno * 2, col.negrita);
+        ops.push(
+          opTexto(t, alinear(col, anchoTexto(t, TABLA.letra, col.negrita)), base + 5.8, TABLA.letra, {
+            negrita: col.negrita,
+            color: col.color?.(datos, valor) || COLOR.tinta,
+          })
+        );
+      }
+    }
+    ops.push(opLinea(MARGEN.izq, base, MARGEN.izq + util, base, COLOR.linea, 0.3));
+    y = base;
+    enCabecera = false;
+  }
+
+  /** Hoja nueva si no cabe `alto`; devuelve true si la hubo. */
+  function asegurar(alto) {
+    if (y - alto >= MARGEN.abajo) return false;
+    nuevaPagina();
+    encabezadoTabla();
+    return true;
+  }
+
+  encabezadoTabla();
+
+  for (const grupo of grupos || [{ filas }]) {
+    if (grupo.titulo) {
+      asegurar(TABLA.hueco + TABLA.grupo + TABLA.fila);
+      bandaGrupo(grupo, false);
+    }
+    (grupo.filas || []).forEach((datos, i) => {
+      if (asegurar(TABLA.fila) && grupo.titulo) bandaGrupo(grupo, true);
+      fila(datos, i);
+    });
+  }
+
+  numerarHojas(paginas, hoja, pie || titulo);
+  return new Blob([serializar(paginas, hoja)], { type: "application/pdf" });
 }
 
 /** Los objetos del PDF, la tabla de posiciones (xref) y el remate. */
-function serializar(paginas) {
+function serializar(paginas, hoja) {
   const objetos = [];
   const nObjetos = 4 + paginas.length * 2; // catalogo, paginas, 2 fuentes, y hoja+contenido por pagina
   const idPagina = (i) => 5 + i * 2;
@@ -309,7 +532,7 @@ function serializar(paginas) {
     const flujo = ops.join("\n");
     objetos[idPagina(i)] =
       "<< /Type /Page /Parent 2 0 R " +
-      `/MediaBox [0 0 ${PAGINA.ancho.toFixed(2)} ${PAGINA.alto.toFixed(2)}] ` +
+      `/MediaBox [0 0 ${hoja.ancho.toFixed(2)} ${hoja.alto.toFixed(2)}] ` +
       "/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> " +
       `/Contents ${idContenido(i)} 0 R >>`;
     objetos[idContenido(i)] = `<< /Length ${flujo.length} >>\nstream\n${flujo}\nendstream`;
