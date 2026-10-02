@@ -63,7 +63,23 @@ function adaptar(res) {
   return res;
 }
 
-const servidor = http.createServer(async (req, res) => {
+/**
+ * Un pedido que el navegador corta a mitad de camino (AbortController al
+ * detener o reintentar) hace fallar la lectura del cuerpo con "aborted". En un
+ * handler async eso era una promesa rechazada sin atrapar, y Node tumbaba el
+ * servidor entero: desde ahi todo daba "Failed to fetch". Cualquier error de
+ * un pedido se queda en ese pedido.
+ */
+const servidor = http.createServer((req, res) => {
+  atender(req, res).catch((e) => {
+    if (req.destroyed || res.destroyed) return; // el navegador ya se fue
+    console.error(e);
+    if (!res.headersSent) adaptar(res).status(500).json({ error: e.message });
+    else res.end();
+  });
+});
+
+async function atender(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (url.pathname.startsWith("/api/")) {
@@ -77,7 +93,12 @@ const servidor = http.createServer(async (req, res) => {
     const trozos = [];
     for await (const t of req) trozos.push(t);
     const crudo = Buffer.concat(trozos).toString("utf8");
-    req.body = crudo ? JSON.parse(crudo) : {};
+    try {
+      req.body = crudo ? JSON.parse(crudo) : {};
+    } catch {
+      adaptar(res).status(400).json({ error: "cuerpo JSON inválido" });
+      return;
+    }
 
     try {
       const mod = await import(`file://${archivo}?t=${Date.now()}`);
@@ -95,7 +116,23 @@ const servidor = http.createServer(async (req, res) => {
     archivo = path.join(DIST, "index.html"); // SPA fallback
   }
   res.setHeader("Content-Type", MIME[path.extname(archivo)] || "application/octet-stream");
-  fs.createReadStream(archivo).pipe(res);
+  fs.createReadStream(archivo)
+    .on("error", (e) => {
+      console.error(e);
+      res.destroy();
+    })
+    .pipe(res);
+}
+
+// Lo que una funcion deje rechazado o lanzado por fuera del pedido (una
+// promesa sin await, un timer) se anota y el servidor sigue atendiendo.
+process.on("unhandledRejection", (e) => console.error("promesa sin atrapar:", e));
+process.on("uncaughtException", (e) => console.error("error sin atrapar:", e));
+
+// el puerto ocupado si cierra el proceso: sin esto quedaria vivo sin escuchar
+servidor.on("error", (e) => {
+  console.error(e.message);
+  process.exit(1);
 });
 
 servidor.listen(PUERTO, () => {
