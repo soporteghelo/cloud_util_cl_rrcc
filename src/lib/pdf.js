@@ -354,7 +354,11 @@ const TABLA = { tarjeta: 44, cabecera: 19, grupo: 19, hueco: 7, fila: 17, letra:
  *   titulo, subtitulo  cabecera, repetida en cada hoja
  *   tarjetas   [{ numero, rotulo, color }] los totales; solo en la primera hoja
  *   columnas   [{ titulo, ancho, alinear, valor(fila), pastilla, color, negrita }]
- *              `ancho` es proporcional: se reparte el ancho util de la hoja
+ *              `ancho` es proporcional: se reparte el ancho util de la hoja.
+ *              En vez de `valor`, `trozos(fila)` -> [{ texto, color, negrita, aire }]
+ *              pone varios textos seguidos, cada uno con su color, en letra
+ *              `letra` (mas chica que la de la tabla si se quiere); `aire` es
+ *              el espacio antes del trozo. Lo que no entra se corta con "…"
  *   filas      los datos, ya filtrados y ordenados como se ven en pantalla
  *   grupos     opcional, en lugar de `filas`: [{ titulo, detalle, filas }]
  *              cada grupo abre con una banda (titulo a la izquierda, detalle
@@ -459,11 +463,31 @@ export async function armarPdfTabla({
     enCabecera = false;
   }
 
+  /** Los `trozos` de una celda, uno detras de otro, hasta donde llegue la columna. */
+  function celdaEnTrozos(col, trozos, base) {
+    const tam = col.letra || TABLA.letra;
+    const limite = col.x + col.ancho - TABLA.relleno;
+    let x = col.x + TABLA.relleno;
+    for (const trozo of trozos) {
+      x += trozo.aire || 0;
+      if (limite - x < anchoTexto("W…", tam)) break; // ni un caracter entra
+      const t = recortar(trozo.texto, tam, limite - x, trozo.negrita);
+      // la letra chica se baja un poco para que quede centrada en la fila
+      ops.push(opTexto(t, x, base + 6, tam, { negrita: trozo.negrita, color: trozo.color || COLOR.tinta }));
+      if (t !== String(trozo.texto)) break; // se corto: lo que sigue ya no cabe
+      x += anchoTexto(t, tam, trozo.negrita);
+    }
+  }
+
   function fila(datos, i) {
     const base = y - TABLA.fila;
     if (i % 2) ops.push(opRecuadro(MARGEN.izq, base, util, TABLA.fila, COLOR.cebra));
 
     for (const col of cols) {
+      if (col.trozos) {
+        celdaEnTrozos(col, col.trozos(datos, i) || [], base);
+        continue;
+      }
       const valor = col.valor(datos, i);
       if (col.pastilla) {
         const t = String(valor);

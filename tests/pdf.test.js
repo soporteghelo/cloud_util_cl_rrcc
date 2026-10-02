@@ -194,3 +194,36 @@ test("agrupado: un grupo que pasa de hoja repite su banda como continuacion", as
   assert.equal([...crudo.matchAll(/\(GUARDIA C \\\(continuaci\xf3n\\\)\) Tj/g)].length, hojas - 1);
   for (const f of filas) assert.ok(crudo.includes(`(${f.dni})`), `falta la fila ${f.dni}`);
 });
+
+test("trozos: cada texto con su color y letra chica; lo que no entra se corta", async () => {
+  const crudo = await tabla(filasDePrueba(1), {
+    columnas: [
+      { titulo: "DNI", ancho: 92, valor: (f) => f.dni },
+      {
+        titulo: "Vencidos A / C",
+        ancho: 200,
+        letra: 7,
+        trozos: () => [
+          { texto: "A", negrita: true, color: "#a3122a" },
+          { texto: "TA, EC", aire: 3 },
+          { texto: "C", negrita: true, color: "#a66a00", aire: 10 },
+          { texto: "AE", aire: 3 },
+        ],
+      },
+    ],
+  });
+  assert.ok(crudo.includes("0.639 0.071 0.165 rg BT /F2 7 Tf"), "la A en rojo, negrita y en letra 7");
+  assert.ok(crudo.includes("0.651 0.416 0.000 rg BT /F2 7 Tf"), "la C en ambar");
+  assert.ok(crudo.includes("(TA, EC) Tj") && crudo.includes("(AE) Tj"));
+
+  const largo = Array.from({ length: 40 }, (_, i) => `R${i}`).join(", ");
+  const cortado = await tabla(filasDePrueba(1), {
+    // los anchos son proporcionales: el DNI se lleva casi toda la hoja
+    columnas: [
+      { titulo: "DNI", ancho: 600, valor: (f) => f.dni },
+      { titulo: "Vencidos", ancho: 100, letra: 7, trozos: () => [{ texto: largo }, { texto: "FIN" }] },
+    ],
+  });
+  assert.ok(cortado.includes("\x85) Tj"), "el trozo largo termina en puntos suspensivos");
+  assert.ok(!cortado.includes("(FIN) Tj"), "lo que viene despues del corte no se dibuja");
+});

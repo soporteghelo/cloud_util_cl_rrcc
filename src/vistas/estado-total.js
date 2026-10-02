@@ -69,13 +69,17 @@ function vencidosPorTipo(vencidos) {
  * los reparte en proporcion): el DNI y los contadores son de tamano fijo, y
  * lo que puede crecer (nombre, cargo) se lleva el resto.
  */
-const COLUMNAS_VISTA = [
+const COLUMNAS_PERSONA = [
   { titulo: "DNI", ancho: 92, valor: (f) => f.persona.dni || "—" },
   { titulo: "Apellidos y nombres", ancho: 295, valor: (f) => (f.persona.nombreCompleto || "—").toUpperCase() },
   { titulo: "Cargo", ancho: 270, valor: (f) => (f.persona.cargo || "—").toUpperCase() },
   { titulo: "Área", ancho: 120, valor: (f) => (f.persona.area || "—").toUpperCase() },
   { titulo: "Vencidos", ancho: 95, valor: (f) => f.vencidos.length, pastilla: () => TINTA.rojo },
   { titulo: "Por vencer", ancho: 105, valor: (f) => f.porVencer.length, pastilla: () => TINTA.ambar },
+];
+
+const COLUMNAS_VISTA = [
+  ...COLUMNAS_PERSONA,
   {
     titulo: "Días",
     ancho: 200,
@@ -83,6 +87,31 @@ const COLUMNAS_VISTA = [
     // los que ya vencieron, en rojo: es lo primero que se busca en la imagen
     color: (f) => (f.dias < 0 ? TINTA.rojo : TINTA.tinta),
   },
+];
+
+const TINTA_TIPO = { A: TINTA.rojo, C: TINTA.ambar, "": TINTA.gris };
+
+/**
+ * "A  TA, EC   C  AE": los codigos vencidos de la persona en sus dos bloques,
+ * la letra del tipo en su color y los codigos en tinta normal. Un RRCC sin
+ * tipo en la hoja sale con "?", igual que en el informe.
+ */
+const trozosVencidos = (f) =>
+  f.vencidos.length
+    ? vencidosPorTipo(f.vencidos).flatMap((g, i) => [
+        { texto: g.tipo || "?", negrita: true, color: TINTA_TIPO[g.tipo], aire: i ? 10 : 0 },
+        { texto: g.items.map((r) => r.codigo).join(", "), aire: 3 },
+      ])
+    : [{ texto: "—", color: TINTA.gris }];
+
+/**
+ * El PDF de la vista cambia los dias por CUALES son los vencidos, en letra
+ * chica y sin pastillas para no recargar la fila: al repartirlo por guardia
+ * es lo que se pregunta, y el cuanto ya lo dicen los contadores.
+ */
+const COLUMNAS_PDF_VISTA = [
+  ...COLUMNAS_PERSONA,
+  { titulo: "Vencidos A / C", ancho: 200, letra: 7, trozos: trozosVencidos },
 ];
 
 /**
@@ -751,8 +780,9 @@ export function montarEstadoTotal() {
    * La misma vista en PDF (A4 apaisado, fondo claro), agrupada por guardia:
    * cada guardia con su banda y sus totales, en el orden de pantalla. A
    * diferencia del PDF del boton de abajo —el informe detallado por persona—
-   * este es la tabla tal cual, y a diferencia de la imagen no tiene tope de
-   * filas: se reparte en hojas repitiendo el encabezado.
+   * este es la tabla, con los codigos vencidos A / C en lugar de los dias, y
+   * a diferencia de la imagen no tiene tope de filas: se reparte en hojas
+   * repitiendo el encabezado.
    */
   async function exportarPdfVista() {
     if (!filas.length) return;
@@ -761,7 +791,12 @@ export function montarEstadoTotal() {
     try {
       const vista = vistaParaExportar();
       descargarBlob(
-        await armarPdfTabla({ ...vista, subtitulo: `${vista.subtitulo} · por guardia`, grupos: porGuardia(filas) }),
+        await armarPdfTabla({
+          ...vista,
+          subtitulo: `${vista.subtitulo} · por guardia`,
+          columnas: COLUMNAS_PDF_VISTA,
+          grupos: porGuardia(filas),
+        }),
         nombre
       );
       consola(`${filas.length} persona(s) exportadas a ${nombre}`, "ok");
