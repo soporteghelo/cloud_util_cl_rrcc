@@ -15,7 +15,7 @@ import { desdeTexto, normalizarLista } from "../lib/dni.js";
 import { extraerDocumentos } from "../lib/excel.js";
 import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, certificadosDeRrcc, MIME_DOCX } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -213,6 +213,11 @@ export function montarRenovacion() {
   }
 
   const visibleDe = (ficha, riesgo) => visibleCon(ficha, riesgo.codigo, ficha.ediciones?.[riesgo.codigo]);
+
+  /** El detalle de la renovacion con el tipo (A/C) que muestra cada tarjeta:
+      es el que decide que certificados van a la carpeta y al ZIP. */
+  const detalleVisible = (ficha, detalle = ficha.detalle || []) =>
+    detalle.map((d) => ({ ...d, tipo: visibleDe(ficha, d).tipo }));
 
   /** La persona tal como la muestran las tarjetas (tipo y vigencia de cada
       riesgo, editados o no). Es la que se imprime en el fotocheck y la que
@@ -607,6 +612,9 @@ export function montarRenovacion() {
     celda.classList.toggle("rc-editado", Object.keys(actual).length > 0);
     celda.querySelector("[data-estado]").textContent = estado.toLowerCase();
     celda.querySelector("[data-tipo]").className = claseTipo(tipo);
+    // solo un "A" lleva su certificado a la carpeta: la "x" sobra en los demas
+    const x = celda.querySelector("[data-cert-x-rrcc]");
+    if (x) x.hidden = tipo !== "A";
     pintarDiscrepancia(card, celda, ficha, codigo, visible);
     moverAGrupo(card, celda, tipo);
     actualizarSeleccion(card, ficha);
@@ -946,6 +954,56 @@ export function montarRenovacion() {
   }
 
   /**
+   * La carpeta lleva solo los certificados de los RRCC con "A". Si despues de
+   * armarla se cambio el tipo de alguno en la ficha, lo que ya esta
+   * (`presentes`, por nombre) deja de coincidir: devuelve los nombres que
+   * sobran y los certificados que faltan. Lo quitado con la "x" no falta.
+   */
+  function certificadosPorConciliar(dni, ficha, presentes) {
+    const fuera = excluidosDe(dni);
+    const sobran = [];
+    const faltan = [];
+    for (const c of certificadosDeRrcc(detalleVisible(ficha))) {
+      const esta = presentes.has(c.archivo);
+      if (!c.entra && esta) sobran.push(c.archivo);
+      else if (c.entra && !esta && !fuera.has(claveCertificado(c.cert))) faltan.push(c);
+    }
+    return { sobran, faltan };
+  }
+
+  /** Baja los certificados que faltan; uno que no se pudo bajar se avisa y se sigue sin el. */
+  async function bajarFaltantes(dni, faltan) {
+    const bajados = [];
+    for (const c of faltan) {
+      try {
+        const r = await descargarCertificado(c.cert);
+        if (!r.sinCertificado) bajados.push({ nombre: c.archivo, datos: r.pdf });
+      } catch (e) {
+        consola(`  ${dni} · ${c.codigo}: no se pudo bajar el certificado (${e.message})`, "warn");
+      }
+    }
+    return bajados;
+  }
+
+  /** El ZIP en memoria (`salida.archivos`) con los certificados del tipo A/C que muestra hoy la ficha. */
+  async function archivosAlDia(dni, ficha) {
+    const archivos = ficha.salida?.archivos;
+    if (!Array.isArray(archivos)) return;
+    const { sobran, faltan } = certificadosPorConciliar(dni, ficha, new Set(archivos.map((a) => a.nombre)));
+    if (!sobran.length && !faltan.length) return;
+    let nuevos = [];
+    if (faltan.length) {
+      mostrarProgreso(dni, "zip", { hecho: 0, total: 1, texto: "bajando los certificados de los RRCC que pasaron a A…" });
+      try {
+        nuevos = await bajarFaltantes(dni, faltan);
+      } finally {
+        mostrarProgreso(dni, "zip", null);
+      }
+    }
+    ficha.salida.archivos = [...archivos.filter((a) => !sobran.includes(a.nombre)), ...nuevos];
+  }
+
+  /**
    * Antes de abrir la carpeta, compartirla o descargarla en ZIP, la carpeta
    * de Drive tiene que mostrar lo mismo que la ficha en pantalla: si se
    * corrigio el EMO, el area, una fecha o el tipo (A/C) despues de la
@@ -982,24 +1040,49 @@ export function montarRenovacion() {
     const tarea = (async () => {
       try {
         const docs = await documentosActuales(ficha);
-        // los dos en una sola llamada a Apps Script (subir-lote)
-        const [fotocheckSubido, wordSubido] = await subirArchivos(folderId, [
+
+        // si se cambio el tipo A/C de algun RRCC despues de armar la carpeta,
+        // sus certificados se ponen al dia: el que dejo de ser "A" sale y el
+        // que paso a "A" se sube. Solo con la carpeta ya armada por esta
+        // sesion (`certificados` = lo que subio): sin eso no se sabe que hay.
+        const enDrive = ficha.salida?.certificados;
+        const conciliar = Array.isArray(enDrive)
+          ? certificadosPorConciliar(dni, ficha, new Set(enDrive.map((c) => c.nombre)))
+          : { sobran: [], faltan: [] };
+        const nuevos = await bajarFaltantes(dni, conciliar.faltan);
+
+        // todo en una sola llamada a Apps Script (subir-lote)
+        const [fotocheckSubido, wordSubido, ...certsSubidos] = await subirArchivos(folderId, [
           { nombre: docs.nombreFotocheck, mime: docs.mimeFotocheck, datos: await blobABase64(docs.pngBlob) },
           { nombre: docs.nombreWord, mime: MIME_DOCX, datos: await blobABase64(docs.docx) },
+          ...(await Promise.all(
+            nuevos.map(async (a) => ({
+              nombre: a.nombre,
+              mime: "application/pdf",
+              datos: await blobABase64(new Blob([a.datos], { type: "application/pdf" })),
+            }))
+          )),
         ]);
+        if (certsSubidos.length) consola(`${dni}: ${certsSubidos.map((c) => c.nombre).join(", ")} agregado(s) a la carpeta (RRCC con "A")`, "ok");
 
         // si se corrigio el nombre, el fotocheck y el Word del nombre anterior
-        // quedarian duplicados en la carpeta: van a la papelera
+        // quedarian duplicados en la carpeta; y los certificados de lo que ya
+        // no es "A" no van: todo eso a la papelera
         const anteriores = [ficha.salida?.fotocheck?.nombre, ficha.salida?.word?.nombre].filter(
           (n) => n && n !== fotocheckSubido.nombre && n !== wordSubido.nombre
         );
-        if (anteriores.length) {
-          drive({ accion: "eliminar", carpetaId: folderId, nombres: anteriores }).catch((e) =>
-            consola(`  no se pudo quitar ${anteriores.join(", ")} de la carpeta: ${e.message}`, "warn")
+        const aQuitar = [...anteriores, ...conciliar.sobran];
+        if (aQuitar.length) {
+          drive({ accion: "eliminar", carpetaId: folderId, nombres: aQuitar }).then(
+            () => conciliar.sobran.length && consola(`${dni}: ${conciliar.sobran.join(", ")} quitado(s) de la carpeta (RRCC sin "A")`, "ok"),
+            (e) => consola(`  no se pudo quitar ${aQuitar.join(", ")} de la carpeta: ${e.message}`, "warn")
           );
         }
 
         ficha.salida = { ...(ficha.salida || {}), carpetaId: folderId, fotocheck: fotocheckSubido, word: wordSubido };
+        if (Array.isArray(enDrive)) {
+          ficha.salida.certificados = [...enDrive.filter((c) => !conciliar.sobran.includes(c.nombre)), ...certsSubidos];
+        }
         ficha.salidaDesactualizada = false;
         return true;
       } catch (e) {
@@ -1074,7 +1157,12 @@ export function montarRenovacion() {
     const ficha = fichas.get(dni);
     const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
     if (!ficha?.salida || !cert.descargable) return;
-    const nombre = nombreEnCarpeta(cert);
+    const clave = claveCertificado(cert);
+    const deRrcc = certificadosDeRrcc(detalleVisible(ficha)).find((c) => claveCertificado(c.cert) === clave);
+    // el de un RRCC "C" o sin tipo no vuelve: solo la "A" va a la carpeta
+    if (deRrcc && !deRrcc.entra) return;
+    // con el mismo nombre con que lo subio la renovacion, o quedaria dos veces
+    const nombre = deRrcc?.archivo || nombreEnCarpeta(cert);
     marcarOcupado(boton, true);
     try {
       const r = await descargarCertificado(cert);
@@ -1120,6 +1208,8 @@ export function montarRenovacion() {
   async function descargarCarpetaUsuario(dni) {
     const ficha = fichas.get(dni);
     const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
+    // un tipo A/C cambiado despues de armar la carpeta: el ZIP sale con lo de ahora
+    if (ficha) await archivosAlDia(dni, ficha);
     const locales = ficha?.salida?.archivos || [];
     if (!folderId && !locales.length) return;
 
@@ -1361,6 +1451,7 @@ export function montarRenovacion() {
         // igual que la del panel lateral. Comparten la clave del certificado,
         // asi que quitarlo en un lado lo muestra quitado en el otro. Solo
         // cambia lo que se sube: la fecha y la "A" de la hoja no se tocan.
+        // En un "C" o sin tipo no aparece: ese certificado no va a la carpeta.
         let certificado = bloqueCert;
         if (!datos.cargando && cert?.descargable) {
           const clave = claveCertificado(cert);
@@ -1368,7 +1459,7 @@ export function montarRenovacion() {
           const tituloX = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
           certificado =
             `<div class="cert-fila rc-cert-fila${fuera ? " excluido" : ""}" data-cert-clave="${escaparHtml(clave)}">${bloqueCert}` +
-            `<button type="button" class="cert-x" data-cert-x-rrcc="${r.codigo}" title="${tituloX}" aria-label="${tituloX}">${fuera ? "↺" : "×"}</button></div>`;
+            `<button type="button" class="cert-x" data-cert-x-rrcc="${r.codigo}" title="${tituloX}" aria-label="${tituloX}"${tipo === "A" ? "" : " hidden"}>${fuera ? "↺" : "×"}</button></div>`;
         }
 
         const opciones = ["", "A", "C"];
@@ -2285,8 +2376,10 @@ export function montarRenovacion() {
       mostrarProgreso(dni, "armado", { hecho: 0, total: 1, texto: "bajando certificados…" });
       try {
         // Se arma con la ficha como esta AHORA: en un lote pudo corregirse a
-        // mano mientras se leian las demas personas.
-        const salida = await generarSalidas({ ...r, despues: ficha.persona, detalle: ficha.detalle || r.detalle }, contexto, {
+        // mano mientras se leian las demas personas (tambien el tipo A/C, que
+        // decide que certificados van).
+        const detalle = detalleVisible(ficha, ficha.detalle || r.detalle);
+        const salida = await generarSalidas({ ...r, despues: ficha.persona, detalle }, contexto, {
           log: logSalida,
           excluidos: excluidosDe(dni),
           senal,

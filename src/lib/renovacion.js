@@ -587,30 +587,58 @@ async function enParalelo(lista, n, fn, senal) {
 const ESTADOS_EN_CARPETA = ["VIGENTE", "ACTUALIZAR"];
 
 /**
+ * El certificado de cada RRCC de la grilla que se puede descargar, con el
+ * nombre que lleva en la carpeta y si le toca ir (`entra`).
+ *
+ * Solo van los de los RRCC AUTORIZADOS ("A"): la carpeta respalda la
+ * autorizacion, y un capacitado ("C") o un RRCC sin tipo no se autoriza con
+ * ella. Ademas tiene que seguir en vigor (`ESTADOS_EN_CARPETA`). Los de EIN
+ * van por el panel lateral, que no mira el estado (ver `certificadosDeCarpeta`),
+ * asi que para ellos solo cuenta la "A".
+ *
+ * `detalle` debe traer el tipo que muestra la ficha (con lo editado a mano):
+ * cambiar una "A" por "C" en la tarjeta la saca de la carpeta.
+ */
+export function certificadosDeRrcc(detalle = []) {
+  return detalle
+    .filter((d) => d.certificado?.descargable)
+    .map((d) => {
+      const cert = d.certificado;
+      const ein = cert.origen === "EIN";
+      const autorizado = String(d.tipo || "").trim().toUpperCase() === "A";
+      return {
+        codigo: d.codigo,
+        cert,
+        ein,
+        archivo: ein ? nombreEnCarpeta(cert) : nombreCertificado(cert),
+        entra: autorizado && (ein || ESTADOS_EN_CARPETA.includes(d.estado)),
+      };
+    });
+}
+
+/**
  * Que certificados van a la carpeta de la persona (y al ZIP), uno por
  * archivo y en el orden en que se bajan.
  *
- * Tanto "A" (autorizados) como "C" (capacitados) suben su PDF si sigue en
- * vigor (`ESTADOS_EN_CARPETA`) y se puede descargar.
+ * De la grilla, solo los de los RRCC con "A" que siguen en vigor
+ * (`certificadosDeRrcc`); los "C" y los sin tipo no van.
  *
  * El PDF consolidado de Drive (en `personales`) no es de ningun curso, asi
  * que no entra en la grilla de riesgos, pero es un certificado de la persona
  * y va en su carpeta igual.
  *
  * Los certificados de EIN y de INDUCCION (los del panel lateral de la ficha)
- * van TODOS a la carpeta, esten o no en la grilla: quien no deba ir se quita
- * con la "x" de ese panel (`excluidos`).
+ * van a la carpeta, esten o no en la grilla, salvo el de EIN que es el de un
+ * RRCC "C" o sin tipo: quien mas no deba ir se quita con la "x" de ese panel
+ * (`excluidos`).
  */
 export function certificadosDeCarpeta(resultado, excluidos = null) {
-  const vigentes = (resultado.detalle || [])
-    .filter(
-      (d) =>
-        ESTADOS_EN_CARPETA.includes(d.estado) &&
-        d.certificado &&
-        d.certificado.descargable &&
-        d.certificado.origen !== "EIN"
-    )
-    .map((d) => ({ codigo: d.codigo, etiqueta: d.codigo, cert: d.certificado, archivo: nombreCertificado(d.certificado) }));
+  const deRrcc = certificadosDeRrcc(resultado.detalle);
+  const vigentes = deRrcc
+    .filter((c) => c.entra && !c.ein)
+    .map((c) => ({ codigo: c.codigo, etiqueta: c.codigo, cert: c.cert, archivo: c.archivo }));
+  // el de EIN de un RRCC que no es "A" tampoco entra por el panel
+  const deOtroTipo = new Set(deRrcc.filter((c) => c.ein && !c.entra).map((c) => claveCertificado(c.cert)));
   const extra = (resultado.personales || [])
     .filter((item) => item.descargable && item.origen !== "INDUCCION")
     .map((item) => ({
@@ -621,7 +649,9 @@ export function certificadosDeCarpeta(resultado, excluidos = null) {
       personal: true,
     }));
   const laterales = (resultado.inventario?.items || [])
-    .filter((item) => item.descargable && ORIGENES_LATERALES.includes(item.origen))
+    .filter(
+      (item) => item.descargable && ORIGENES_LATERALES.includes(item.origen) && !deOtroTipo.has(claveCertificado(item))
+    )
     .map((item) => ({
       codigo: item.origen,
       etiqueta: `[${item.origen}] ${item.curso || ""}`.trim(),
@@ -644,7 +674,7 @@ export function certificadosDeCarpeta(resultado, excluidos = null) {
 
 /**
  * Crea la carpeta de la persona en Drive y le deja dentro:
- *   - los certificados de los RRCC que siguen en vigor (vigentes o por vencer),
+ *   - los certificados de los RRCC autorizados ("A") que siguen en vigor,
  *   - el PNG del fotocheck nuevo,
  *   - el Word con el fotocheck nuevo (10 x 8 cm) y la foto del antiguo.
  *
@@ -809,7 +839,7 @@ export async function generarSalidas(
   total = 1 + tareas.length + 2; // DRIVE: carpeta + cada certificado + fotocheck + Word
   totalZip = tareas.length + 2; // ZIP: cada certificado + fotocheck + Word
   log(
-    `${vigentes.length} certificado(s) en vigor (vigentes o por vencer) para subir` +
+    `${vigentes.length} certificado(s) de RRCC "A" en vigor para subir` +
       (extra.length ? ` + ${extra.length} de Drive` : "") +
       (deLaterales ? ` + ${deLaterales} de EIN/inducción` : "")
   );
