@@ -14,7 +14,7 @@ import { normalizarDni } from "../lib/dni.js";
 import { aFormatoCorto } from "../../shared/estados.js";
 import { obtenerContexto, obtenerPersona } from "../lib/datos.js";
 import { altaPersona, generarSalidas, subirFoto } from "../lib/renovacion.js";
-import { tiposDeMatriz, cargoMasParecido } from "../../shared/estados.js";
+import { tiposDeMatriz, cargoMasParecido, cargosDeMatriz } from "../../shared/estados.js";
 import { RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 
@@ -277,10 +277,6 @@ export function montarNuevo() {
 
   function pintarCatalogo({ cargos, areas }) {
     catalogo = { cargos, areas };
-  }
-
-  function cargosDeMatriz(matriz = []) {
-    return [...new Set(matriz.map((fila) => String(fila?.[0] ?? "").trim()).filter(Boolean))].sort();
   }
 
   function areasDeMatriz(matriz = []) {

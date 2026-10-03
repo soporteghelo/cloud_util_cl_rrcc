@@ -930,6 +930,57 @@ h1 {
 #vista-renovacion .col-in .panel-head h2 { white-space: normal; }
 #vista-renovacion .col-in .btn-go { font-size: 11px; letter-spacing: 0.08em; white-space: normal; }
 
+/* Cargo -> cursos "A" (MATRIZ_PUESTO), al pie de la lista de DNIs. Se lleva
+   lo que necesita y el textarea el resto; con poco alto, la lista se
+   desplaza por dentro. Las sugerencias abren hacia ARRIBA: abajo no queda
+   sitio antes del borde del panel y se cortarian. */
+.rn-cargo {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.rn-cargo .lbl { margin-bottom: 0; }
+.rn-cargo .inp { font-size: 11.5px; padding: 8px 9px; letter-spacing: 0.02em; }
+.rn-cargo .inp-borrable .inp { padding-right: 34px; }
+.rn-cargo .borrador { right: 3px; }
+.rn-cargo .ac-lista { top: auto; bottom: calc(100% + 2px); max-height: min(260px, 45vh); font-size: 10.5px; }
+.rn-cargo-res { min-height: 0; overflow-y: auto; display: grid; gap: 10px; align-content: start; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.rn-cargo-nota { font-size: 10.5px; line-height: 1.5; color: var(--tx-mute); }
+.rn-cargo-grupo { display: grid; gap: 4px; }
+.rn-cargo-head { display: flex; justify-content: space-between; gap: 6px; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.rn-cargo-head b { color: var(--gr); font-weight: 700; }
+.rn-cargo-head span, .rn-cargo-areas { color: var(--tx-mute); }
+.rn-cargo-areas { font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.rn-cargo-a { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rn-cargo-a li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 6px;
+  border-left: 2px solid var(--gr);
+  background: rgba(0, 255, 156, 0.05);
+  font-size: 10.5px;
+  color: var(--tx);
+}
+.rn-cargo-a li b { flex: 0 0 28px; color: var(--gr); font-size: 10px; letter-spacing: 0.04em; }
+.rn-cargo-sug {
+  justify-self: start;
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: var(--r);
+  color: var(--cy);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.rn-cargo-sug:hover, .rn-cargo-sug:focus-visible { border-color: var(--cy); background: rgba(34, 211, 238, 0.08); outline: none; }
+
 /* ---------------- pestanas ---------------- */
 
 .tabs {

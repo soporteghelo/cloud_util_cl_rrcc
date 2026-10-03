@@ -32,6 +32,7 @@ import {
 } from "../../shared/estados.js";
 import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
+import { montarCursosDeCargo } from "./cursos-cargo.js";
 import { armarAutorizacion } from "../lib/docx.js";
 import { fotocheckImagen, nombreFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
 import { abrirFotocheck, actualizarFotocheck, cerrarFotocheck, fotocheckAbiertoDe } from "./fotocheck-modal.js";
@@ -73,6 +74,8 @@ export function normalizarCambiosPendientes(ficha, contextoExtra = {}) {
 export function montarRenovacion() {
   const consola = crearConsola("rn-term", "rn-log-clear");
   const barra = crearProgreso("rn");
+  // al pie de la lista de DNIs: cargo -> sus cursos "A" segun MATRIZ_PUESTO
+  montarCursosDeCargo();
 
   const el = {
     dnis: $("rn-dnis"),

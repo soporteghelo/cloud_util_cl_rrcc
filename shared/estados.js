@@ -872,6 +872,60 @@ function distanciaEdicion(a, b) {
   return fila[b.length];
 }
 
+/** Texto comparable de un cargo: sin tildes, en mayusculas y con un solo espacio. */
+const claveCargo = (s) =>
+  String(s ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Los cargos de MATRIZ_PUESTO (sin la cabecera), sin repetir y en orden alfabetico. */
+export function cargosDeMatriz(filas) {
+  if (!filas || !filas.length) return [];
+  const iCargo = filas[0].map(claveCargo).indexOf("CARGO");
+  if (iCargo < 0) return [];
+  const vistos = new Map();
+  for (const fila of filas.slice(1)) {
+    const cargo = String(fila?.[iCargo] ?? "").trim();
+    if (cargo && !vistos.has(claveCargo(cargo))) vistos.set(claveCargo(cargo), cargo);
+  }
+  return [...vistos.values()].sort((a, b) => a.localeCompare(b, "es"));
+}
+
+/**
+ * Lo que MATRIZ_PUESTO exige a un cargo: sus RRCC "A" y "C", en el orden del
+ * catalogo. Un mismo cargo puede estar en mas de un frente/area: las filas que
+ * piden lo mismo se juntan (con sus areas) y las que no, van aparte.
+ *
+ * Devuelve [{ areas: ["AVANCES", ...], autorizados: ["AE", ...], capacitados: [...] }],
+ * vacio si el cargo no esta en la matriz. Las tildes, mayusculas y espacios
+ * de mas no cuentan.
+ */
+export function exigenciasDeCargo(filas, cargo) {
+  if (!filas || !filas.length || !claveCargo(cargo)) return [];
+  const cab = filas[0].map(claveCargo);
+  const iCargo = cab.indexOf("CARGO");
+  const iArea = cab.indexOf("AREA");
+  if (iCargo < 0) return [];
+
+  const grupos = new Map();
+  for (const fila of filas.slice(1)) {
+    if (claveCargo(fila?.[iCargo]) !== claveCargo(cargo)) continue;
+    const de = (tipo) =>
+      CODIGOS_RRCC.filter((codigo) => cab.includes(codigo) && claveCargo(fila[cab.indexOf(codigo)]) === tipo);
+    const autorizados = de("A");
+    const capacitados = de("C");
+    const clave = `${autorizados.join(",")}|${capacitados.join(",")}`;
+    if (!grupos.has(clave)) grupos.set(clave, { areas: [], autorizados, capacitados });
+    const area = iArea >= 0 ? String(fila[iArea] ?? "").trim() : "";
+    const g = grupos.get(clave);
+    if (area && !g.areas.includes(area)) g.areas.push(area);
+  }
+  return [...grupos.values()];
+}
+
 /**
  * Cargo de la matriz mas parecido al escrito, para avisar de un typo cuando
  * `tiposDeMatriz` no encuentra fila exacta (la planilla arrastra variantes:
