@@ -2026,6 +2026,107 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   .et-inf-dias, .et-inf-fecha { width: auto; }
 }
 
+/* ==========================================================================
+   EXPORTACION - autorizados "A" en vigor, con su ZIP de certificados
+   ========================================================================== */
+
+/* como en ESTADO TOTAL: solo la tabla desplaza y su encabezado queda fijo */
+.ex-body { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+.ex-body #ex-resultados { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.ex-tabla thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* las pastillas de los RRCC "A" bajan de linea en vez de ensanchar la tabla */
+.ex-tabla td.ex-rrcc { width: 36%; white-space: normal; }
+.ex-rrcc .et-badge { margin: 1px 4px 1px 0; }
+.ex-tabla td:nth-child(2) { white-space: normal; }
+.panel-go #ex-stop { width: 100%; margin-top: 9px; }
+.panel-go #ex-stop[hidden] { display: none; }
+
+@media (max-width: 900px) {
+  .ex-body { display: block; overflow: visible; }
+  .ex-body #ex-resultados { overflow: visible; }
+}
+
+/* ==========================================================================
+   MANUAL - guia de uso y de como guardar lo que la app lee de Drive
+   ========================================================================== */
+
+#vista-manual { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.panel-manual { flex: 1 1 auto; }
+
+.manual { font-size: 12px; line-height: 1.65; color: var(--tx); }
+.manual-intro { margin: 0 0 14px; color: var(--tx-dim); }
+.manual code {
+  font-family: var(--mono);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--gr);
+  word-break: break-word;
+}
+/* los nombres de botones de la app, para reconocerlos al buscarlos */
+.manual kbd {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--cy);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+.manual-pasos { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.manual-pasos li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--cy);
+  border-radius: var(--r);
+  background: rgba(34, 211, 238, 0.03);
+}
+.manual-pasos b { font-size: 11px; letter-spacing: 0.14em; color: var(--cy); }
+.manual-pasos span { color: var(--tx-dim); }
+
+.manual-carpeta {
+  margin-bottom: 16px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gr);
+  border-radius: var(--r);
+}
+.manual-carpeta header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.manual-carpeta header b { font-size: 11.5px; letter-spacing: 0.12em; color: var(--gr); }
+.manual-carpeta header .btn { flex: 0 0 auto; margin-left: auto; min-height: 32px; padding: 6px 12px; text-decoration: none; }
+.manual-carpeta ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; color: var(--tx-dim); }
+.manual-carpeta li::marker { color: var(--gr); }
+/* el formato del nombre es lo que se viene a buscar: va en su propia linea, mas grande */
+.manual .manual-formato { display: block; margin: 5px 0; padding: 7px 10px; font-size: 12.5px; font-weight: 700; }
+
+.manual-prompt-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; margin-bottom: 7px; }
+.manual-prompt-head .lbl { flex: 1 1 260px; margin: 0; font-size: 11px; letter-spacing: 0.02em; line-height: 1.55; text-transform: none; }
+.manual-prompt-head .btn { flex: 0 0 auto; min-height: 32px; padding: 6px 12px; }
+.manual-prompt pre {
+  margin: 0;
+  padding: 11px 13px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--tx);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+}
+
 /* ---------------- impresion ---------------- */
 
 @media print {

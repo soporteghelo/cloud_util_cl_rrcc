@@ -42,6 +42,12 @@
           <button class="tab" id="tab-estado-total" type="button" role="tab" aria-selected="false">
             ESTADO TOTAL
           </button>
+          <button class="tab" id="tab-exportacion" type="button" role="tab" aria-selected="false">
+            EXPORTACIÓN
+          </button>
+          <button class="tab" id="tab-manual" type="button" role="tab" aria-selected="false">
+            MANUAL
+          </button>
         </nav>
 
         <div class="head-r">
@@ -639,6 +645,286 @@
             </div>
             <div class="panel-body panel-body-flush">
               <div class="term" id="et-term" role="log" aria-live="polite"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ============================================================= -->
+      <!-- VISTA 6 · EXPORTACION (autorizados "A" + ZIP de certificados)  -->
+      <!-- ============================================================= -->
+      <div class="vista" id="vista-exportacion" hidden>
+        <div class="col col-in">
+          <section class="panel panel-obj">
+            <div class="panel-head">
+              <h2>01 · FILTROS</h2>
+              <span class="count" id="ex-count">0 personas</span>
+              <button
+                class="lnk lnk-recargar"
+                id="ex-recargar"
+                type="button"
+                title="Volver a traer el personal de la hoja, ignorando lo ya cargado"
+                hidden
+              >
+                ↻ recargar
+              </button>
+            </div>
+            <div class="panel-body panel-body-col">
+              <label class="lbl" for="ex-buscar">Buscar (nombre, DNI, área, cargo)</label>
+              <input
+                class="inp"
+                id="ex-buscar"
+                type="search"
+                autocomplete="off"
+                placeholder="ej. LOPEZ, 71481337, MINA"
+              />
+
+              <label class="lbl">Estado de la autorización</label>
+              <div class="et-tipos" role="group" aria-label="Filtrar por estado de la autorización">
+                <button
+                  class="btn btn-ghost"
+                  id="ex-estado-vigente"
+                  type="button"
+                  data-estado="VIGENTE"
+                  aria-pressed="false"
+                  title="Solo las autorizaciones VIGENTES. Otro clic lo quita; sin marcar se ven vigentes y por vencer"
+                >
+                  VIGENTE
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  id="ex-estado-actualizar"
+                  type="button"
+                  data-estado="ACTUALIZAR"
+                  aria-pressed="false"
+                  title="Solo las autorizaciones POR VENCER (ACTUALIZAR). Otro clic lo quita; sin marcar se ven vigentes y por vencer"
+                >
+                  ACTUALIZAR
+                </button>
+              </div>
+
+              <label class="lbl" for="ex-riesgo-btn">Riesgo crítico</label>
+              <div class="msel" id="ex-riesgo">
+                <button class="inp msel-btn" id="ex-riesgo-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="msel-txt">TODOS LOS RRCC</span>
+                  <span class="msel-car">▾</span>
+                </button>
+                <div class="msel-panel" role="listbox" aria-multiselectable="true" hidden></div>
+              </div>
+
+              <div class="avisos">
+                <div class="alert alert-info">
+                  Personal ACTIVO con RRCC autorizados ("A") vigentes o por vencer, según la hoja.
+                  <b>DESCARGAR ZIP</b> busca el certificado de cada uno en JOMISER, EIN y Drive (como la
+                  renovación): con listas largas tarda varios minutos. El ZIP trae un <code>INDICE.xlsx</code> con lo
+                  que no se encontró.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-go">
+            <div class="panel-body">
+              <button class="btn btn-go" id="ex-cargar" type="button">
+                <span class="go-txt">CARGAR PERSONAL</span>
+                <span class="go-arrow">▸</span>
+              </button>
+              <div class="form-2">
+                <button
+                  class="btn btn-ghost"
+                  id="ex-excel"
+                  type="button"
+                  title="Descargar en Excel (.xlsx) la lista filtrada: una fila por autorización y otra hoja por persona"
+                  disabled
+                >
+                  EXCEL
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  id="ex-zip"
+                  type="button"
+                  title="Descargar un ZIP con el certificado de cada autorización de la lista filtrada, todos sueltos y nombrados DNI_RRCC_FECHA_APELLIDOS NOMBRES.pdf"
+                  disabled
+                >
+                  DESCARGAR ZIP
+                </button>
+              </div>
+              <button class="btn btn-stop" id="ex-stop" type="button" hidden>ABORTAR</button>
+              <div class="bar-wrap" id="ex-bar-wrap" hidden>
+                <div class="bar"><div class="bar-fill" id="ex-bar-fill"></div></div>
+                <div class="bar-meta">
+                  <span id="ex-bar-txt">en espera</span>
+                  <span id="ex-bar-pct">0%</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col col-out">
+          <section class="panel panel-res">
+            <div class="panel-head">
+              <h2>02 · AUTORIZADOS</h2>
+              <span class="count" id="ex-res-count"></span>
+            </div>
+            <div class="panel-body ex-body">
+              <div id="ex-resultados"></div>
+            </div>
+          </section>
+
+          <section class="panel panel-term">
+            <div class="panel-head">
+              <h2>03 · CONSOLA</h2>
+              <button class="lnk" id="ex-log-clear" type="button">limpiar</button>
+            </div>
+            <div class="panel-body panel-body-flush">
+              <div class="term" id="ex-term" role="log" aria-live="polite"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ============================================================= -->
+      <!-- VISTA 7 · MANUAL (uso de la app y carpetas de Drive)           -->
+      <!-- ============================================================= -->
+      <div class="vista" id="vista-manual" hidden>
+        <div class="col">
+          <section class="panel panel-manual">
+            <div class="panel-head">
+              <h2>01 · CÓMO SE USA</h2>
+            </div>
+            <div class="panel-body panel-body-scroll manual">
+              <p class="manual-intro">
+                La app busca los certificados de cada persona en <b>JOMISER</b>, <b>EIN</b> y <b>Drive</b>,
+                renueva su Autorización de Riesgos Críticos en la hoja <code>BD AESA</code> y deja en Drive su
+                carpeta con los certificados, el fotocheck y el Word.
+              </p>
+
+              <ol class="manual-pasos">
+                <li>
+                  <b>RENOVACIÓN</b>
+                  <span>
+                    Pega uno o varios DNI (uno por línea) o sube un Excel/CSV y pulsa
+                    <kbd>RENOVAR AUTORIZACIONES</kbd>. Sale una ficha por persona: revisa las fechas de cada RRCC,
+                    corrige lo que haga falta y pulsa <kbd>GUARDAR CAMBIOS</kbd>. Desde la ficha se abre, se
+                    descarga o se envía por WhatsApp su carpeta de Drive.
+                  </span>
+                </li>
+                <li>
+                  <b>CERTIFICADOS</b>
+                  <span>
+                    Solo descarga: DNI o lista → <kbd>INICIAR EXTRACCIÓN</kbd> → ZIP o carpeta de tu PC. No toca
+                    la hoja.
+                  </span>
+                </li>
+                <li>
+                  <b>NUEVO PERSONAL</b>
+                  <span>
+                    Alta de alguien que aún no está en la hoja. Llena sus datos y su foto (obligatoria); la matriz
+                    por puesto propone qué RRCC le corresponden. Termina con <kbd>DAR DE ALTA Y RENOVAR</kbd>.
+                  </span>
+                </li>
+                <li>
+                  <b>ESTADO RRCC</b>
+                  <span>
+                    Por cada riesgo crítico, quién está vencido o por vencer, separado por guardia. Filtra y usa
+                    <kbd>IMPRIMIR</kbd> o <kbd>EXCEL</kbd>.
+                  </span>
+                </li>
+                <li>
+                  <b>ESTADO TOTAL</b>
+                  <span>
+                    Personal activo con algún RRCC vencido. Clic en una fila para ver el detalle. Se exporta en PDF
+                    (el detalle por persona, o la tabla por guardia con <kbd>⤓ exportar pdf</kbd>), Excel o imagen.
+                  </span>
+                </li>
+                <li>
+                  <b>EXPORTACIÓN</b>
+                  <span>
+                    Personal activo con RRCC autorizados ("A") vigentes o por vencer. Filtra por estado y por RRCC;
+                    <kbd>EXCEL</kbd> baja la lista y <kbd>DESCARGAR ZIP</kbd> junta el certificado de cada autorización
+                    (sueltos, nombrados <code>DNI_RRCC_FECHA_APELLIDOS NOMBRES.pdf</code>), con un
+                    <code>INDICE.xlsx</code> de lo que no se encontró.
+                  </span>
+                </li>
+              </ol>
+
+              <div class="alert alert-info">
+                <b>BASE OK</b> (arriba a la derecha) indica que la hoja respondió. Sin ella se pueden buscar y
+                descargar certificados, pero no se guarda nada en la hoja. Si algo falla, la <b>CONSOLA</b> de cada
+                pestaña dice por qué.
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="panel panel-manual">
+            <div class="panel-head">
+              <h2>02 · CARPETAS DE DRIVE</h2>
+            </div>
+            <div class="panel-body panel-body-scroll manual">
+              <p class="manual-intro">
+                Algunos certificados la app no los descarga de ningún sistema: los lee de una carpeta de Drive. Si
+                el PDF no está en esa carpeta o no tiene el nombre correcto, la app no lo encuentra.
+              </p>
+
+              <article class="manual-carpeta">
+                <header>
+                  <b>CERTIFICADOS DE REINDUCCIÓN</b>
+                  <a
+                    class="btn btn-ghost btn-sm"
+                    href="https://drive.google.com/drive/folders/13AK2ibTDeNH-3EsxdOCcp8VCgEX-mq2d?usp=sharing"
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    ABRIR CARPETA ↗
+                  </a>
+                </header>
+                <ol>
+                  <li>
+                    Guarda el PDF en esta carpeta, dentro de la subcarpeta del año (p. ej. <code>2026</code>). Una
+                    subcarpeta recién creada tarda hasta 10 minutos en aparecer en la app.
+                  </li>
+                  <li>
+                    Nómbralo así:
+                    <code class="manual-formato">DNI_APELLIDO PATERNO APELLIDO MATERNO NOMBRES.pdf</code>
+                    Ejemplo: <code>43662788_ATAUCUSI HUAMAN RODOLFO WILFREDO.pdf</code>
+                  </li>
+                  <li>El DNI va con sus 8 dígitos (con los ceros iniciales) y un guion bajo; el nombre, en MAYÚSCULAS.</li>
+                  <li>
+                    La próxima vez que se busque ese DNI, el certificado sale en la ficha de RENOVACIÓN (panel
+                    <b>CERTIFICADOS INDUCCION</b>) y en CERTIFICADOS.
+                  </li>
+                </ol>
+              </article>
+
+              <div class="manual-prompt">
+                <div class="manual-prompt-head">
+                  <span class="lbl">
+                    ¿Muchos PDF con nombres desordenados? Pásaselos a un asistente de IA que trabaje con archivos
+                    (p. ej. Claude) con este prompt, revisa su tabla «Antes → Después» y súbelos a la carpeta.
+                  </span>
+                  <button class="btn btn-ghost btn-sm" id="mn-copiar" type="button">COPIAR PROMPT</button>
+                </div>
+<pre id="mn-prompt">
+Renombra todos los archivos PDF de la carpeta adjunta con este formato:
+
+DNI_APELLIDO PATERNO APELLIDO MATERNO NOMBRES.pdf
+Ejemplo: 43662788_ATAUCUSI HUAMAN RODOLFO WILFREDO.pdf
+
+Instrucciones:
+1. Abre cada PDF y extrae el nombre completo y el DNI desde el CONTENIDO del documento
+   (no te guíes por el nombre actual del archivo, puede estar incompleto o mal escrito).
+2. Usa el DNI de 8 dígitos tal cual aparece (conserva los ceros iniciales).
+3. Escribe el nombre en MAYÚSCULAS, con un solo espacio entre palabras, respetando
+   tildes y Ñ tal como figuran en el documento. Sin fechas, sin nombre del curso, sin guiones extra.
+4. Si un PDF no tiene texto (es escaneado), léelo como imagen u OCR.
+5. Si no encuentras el DNI o el nombre en algún archivo, NO lo renombres y avísame.
+6. Si dos archivos quedarían con el mismo nombre, no sobrescribas: avísame.
+7. Al terminar, muéstrame una tabla "Antes → Después" y señala cualquier diferencia
+   entre el nombre original del archivo y lo que dice el documento (posibles errores de tipeo).</pre>
+              </div>
             </div>
           </section>
         </div>
