@@ -269,6 +269,7 @@ export const COLUMNAS_EDITABLES = {
   Nombres: "texto",
   "Cargo Planilla": "texto",
   EMPRESA: "texto",
+  "USO DE LENTES": "texto",
 };
 
 /**

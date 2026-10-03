@@ -29,6 +29,7 @@ import {
   aplicarEdicionesManuales,
   admiteAplicarC,
   leerFila,
+  normalizarLentes,
 } from "../../shared/estados.js";
 import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
@@ -236,6 +237,8 @@ export function montarRenovacion() {
       nombres: h.nombres,
       cargo: h.cargo,
       empresa: h.empresa,
+      // "SI" / "NO" (o vacio si la hoja trae otra cosa)
+      usoLentes: normalizarLentes(h.usoLentes),
     };
   }
 
@@ -259,7 +262,25 @@ export function montarRenovacion() {
     fila[INDICE["Nombres"]] = d.nombres;
     fila[INDICE["Cargo Planilla"]] = d.cargo;
     fila[INDICE["EMPRESA"]] = d.empresa;
+    // sin editar, el fotocheck imprime lo que diga la hoja, tal cual
+    if (ficha.datosEdit?.usoLentes !== undefined) fila[INDICE["USO DE LENTES"]] = d.usoLentes;
     return leerFila(fila);
+  }
+
+  /**
+   * USO DE LENTES (columna O): SI o NO. La opcion vacia solo aparece si la
+   * hoja no trae ninguno de los dos, para no obligar a elegir; una vez puesto
+   * no se puede volver a dejar en blanco.
+   */
+  function htmlCampoLentes(ficha) {
+    const valor = datosVisibles(ficha).usoLentes;
+    const opciones = datosBase(ficha).usoLentes ? ["SI", "NO"] : ["", "SI", "NO"];
+    return (
+      `<label class="campo-ficha campo-lentes${ficha.datosEdit?.usoLentes !== undefined ? " editado" : ""}" title="Uso de lentes (columna USO DE LENTES de la hoja). Se imprime en el fotocheck y se puede corregir aquí"><span>USO DE LENTES</span>` +
+      `<select data-lentes aria-label="Uso de lentes">` +
+      opciones.map((o) => `<option value="${o}"${o === valor ? " selected" : ""}>${o || "—"}</option>`).join("") +
+      `</select></label>`
+    );
   }
 
   const htmlEstadoFinal = (p) =>
@@ -1286,6 +1307,7 @@ export function montarRenovacion() {
 
     card.querySelector(".campo-emo").classList.toggle("editado", actual.emoVenc !== undefined);
     card.querySelector(".campo-area").classList.toggle("editado", actual.area !== undefined);
+    card.querySelector(".campo-lentes")?.classList.toggle("editado", actual.usoLentes !== undefined);
     for (const clave of ["apellidos", "nombres", "cargo", "empresa"]) {
       card.querySelector(`[data-${clave}]`)?.classList.toggle("editado", actual[clave] !== undefined);
     }
@@ -1571,6 +1593,7 @@ export function montarRenovacion() {
       `<input type="date" data-emo-venc value="${persona.vencimientoEmo || ""}" aria-label="Vencimiento del EMO" /></label>` +
       `<label class="campo-ficha campo-area${datosEdit.area !== undefined ? " editado" : ""}" title="Área de la planilla. Se imprime en el fotocheck y se puede corregir aquí"><span>ÁREA</span>` +
       `<input type="text" id="area-${dni}" data-area value="${escaparHtml(persona.area)}" placeholder="sin área" autocomplete="off" aria-label="Área" /></label>` +
+      htmlCampoLentes(datos) +
       (datos.fotoResuelta && !datos.foto
         ? `<button type="button" class="btn btn-warn btn-sm" data-agregar-foto="${dni}" title="No se encontró la foto de esta persona en la carpeta FOTOS de Drive. Toca para tomarla con la cámara o elegirla de la galería">SIN FOTO · AGREGAR</button>`
         : "") +
@@ -1687,6 +1710,8 @@ export function montarRenovacion() {
     };
     for (const evento of ["input", "change", "blur"]) campoArea.addEventListener(evento, sincronizarArea);
     autocompletar(campoArea, { obtener: () => areasConocidas, nombre: "áreas" });
+    const campoLentes = card.querySelector("[data-lentes]");
+    campoLentes?.addEventListener("change", () => editarDatos(dni, card, { usoLentes: campoLentes.value }));
 
     // apellidos, nombres, cargo y empresa: mismo patron de sincronizacion que area
     for (const [selector, clave] of [
@@ -1815,6 +1840,7 @@ export function montarRenovacion() {
     if (columnas.includes("Apellidos") || columnas.includes("Nombres")) lineas.push(`Nombre: ${hoja.nombreCompleto || "vacío"}`);
     if (columnas.includes("Cargo Planilla")) lineas.push(`Cargo: ${hoja.cargo || "vacío"}`);
     if (columnas.includes("EMPRESA")) lineas.push(`Empresa: ${hoja.empresa || "vacía"}`);
+    if (columnas.includes("USO DE LENTES")) lineas.push(`Uso de lentes: ${hoja.usoLentes || "vacío"}`);
     const dif = guardado.diferencias.map(
       (d) => `${d.codigo} ${d.campo}: se pidió ${aFormatoCorto(d.esperado) || d.esperado || "vacío"}, la hoja tiene ${aFormatoCorto(d.real) || d.real || "vacío"}`
     );
@@ -1909,17 +1935,32 @@ export function montarRenovacion() {
       if (datosEdit.nombres !== undefined) datos["Nombres"] = datosEdit.nombres.toUpperCase();
       if (datosEdit.cargo !== undefined) datos["Cargo Planilla"] = datosEdit.cargo;
       if (datosEdit.empresa !== undefined) datos["EMPRESA"] = datosEdit.empresa;
+      if (datosEdit.usoLentes !== undefined) datos["USO DE LENTES"] = datosEdit.usoLentes;
       for (const [columna, valor] of Object.entries(datos)) valores[INDICE[columna]] = valor;
+      // Un Code.gs sin redesplegar todavia no deja escribir las columnas que
+      // se sumaron despues (el examen, el uso de lentes): rechaza el guardado
+      // entero. Se quita la que rechazo, se avisa y se guarda lo demas.
+      // El uso de lentes que no entro queda como cambio sin guardar (el examen
+      // no: sale del EMO, que si se guarda).
+      const RECIENTES = { "F. Ex. Medico": "el examen médico", "USO DE LENTES": "el uso de lentes" };
+      const quedanPendientes = {};
       let guardado;
-      try {
-        guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
-      } catch (e) {
-        // un Code.gs sin redesplegar todavia no deja escribir el examen: se guarda lo demas
-        if (!datos["F. Ex. Medico"] || !/no editable.*F\. Ex\. Medico/.test(e.message)) throw e;
-        delete datos["F. Ex. Medico"];
-        valores[INDICE["F. Ex. Medico"]] = ficha.valores[INDICE["F. Ex. Medico"]];
-        consola("el examen médico no se escribió en la hoja: falta redesplegar Apps Script (Code.gs)", "warn");
-        guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
+      for (;;) {
+        try {
+          guardado = await guardarFilaVerificada({ fila: ficha.fila, valores, dni: ficha.persona.dni, codigos, datos });
+          break;
+        } catch (e) {
+          const columna = Object.keys(RECIENTES).find(
+            (c) => datos[c] !== undefined && e.message.includes(`no editable desde la app: ${c}`)
+          );
+          if (!columna) throw e;
+          delete datos[columna];
+          valores[INDICE[columna]] = ficha.valores[INDICE[columna]];
+          if (columna === "USO DE LENTES") quedanPendientes.usoLentes = datosEdit.usoLentes;
+          const aviso = `${RECIENTES[columna]} no se escribió en la hoja: falta redesplegar Apps Script (Code.gs)`;
+          if (!codigos.length && !Object.keys(datos).length) throw new Error(aviso);
+          consola(aviso, "warn");
+        }
       }
 
       // se vuelve a calcular contra los certificados, sin red, para que los
@@ -1937,10 +1978,8 @@ export function montarRenovacion() {
       ficha.alertas = r.alertas;
       ficha.resumen = resumenAutorizaciones(r.detalle);
       ficha.ediciones = {};
-      ficha.datosEdit = {};
-      ficha.ediciones = {};
-      ficha.datosEdit = {};
-      normalizarCambiosPendientes(ficha);
+      ficha.datosEdit = { ...quedanPendientes };
+      normalizarCambiosPendientes(ficha, { baseRiesgo, baseDatos: datosBase });
       pintarFicha(dni, ficha);
       const partes = [];
       if (codigos.length) partes.push(`${codigos.length} riesgo(s)`);
@@ -1949,6 +1988,7 @@ export function montarRenovacion() {
       if (datos["Apellidos"] !== undefined || datos["Nombres"] !== undefined) partes.push("nombre");
       if (datos["Cargo Planilla"] !== undefined) partes.push("cargo");
       if (datos["EMPRESA"] !== undefined) partes.push("empresa");
+      if (datos["USO DE LENTES"] !== undefined) partes.push("uso de lentes");
       confirmarGuardado(guardado, codigos, `${partes.join(" + ")} corregido(s) a mano`, Object.keys(datos));
     } catch (e) {
       botones.forEach((b) => (b.disabled = false));

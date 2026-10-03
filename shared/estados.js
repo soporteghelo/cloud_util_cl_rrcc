@@ -700,7 +700,23 @@ export const DATOS_EDITABLES = {
   Nombres: { tipo: "texto", codigo: "NOMBRES", campo: "nombres" },
   "Cargo Planilla": { tipo: "texto", codigo: "CARGO", campo: "cargo" },
   EMPRESA: { tipo: "texto", codigo: "EMPRESA", campo: "empresa" },
+  "USO DE LENTES": { tipo: "texto", codigo: "LENTES", campo: "uso de lentes" },
 };
+
+/**
+ * USO DE LENTES solo vale "SI" o "NO". La hoja trae de todo ("Sí", "si",
+ * "N"...): se lleva a uno de los dos, y lo que no se reconoce queda vacio.
+ */
+export function normalizarLentes(valor) {
+  const t = String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toUpperCase();
+  if (t === "SI" || t === "S") return "SI";
+  if (t === "NO" || t === "N") return "NO";
+  return "";
+}
 
 /**
  * Compara lo que se quiso escribir con lo que la hoja tiene despues de

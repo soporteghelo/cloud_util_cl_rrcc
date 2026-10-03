@@ -1475,8 +1475,11 @@ button.cert-fecha:hover, button.cert-fecha:focus-visible { background: rgba(0, 2
 }
 .card-barra .card-id { flex-wrap: wrap; row-gap: 6px; }
 .campo-ficha { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 3px 6px 3px 9px; border: 1px solid var(--line); border-radius: 3px; background: #060b12; font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em; color: var(--tx-dim); white-space: nowrap; }
-.campo-ficha input { min-height: 28px; padding: 2px 6px; color-scheme: dark; font: inherit; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--cy); background: rgba(2, 5, 9, 0.55); border: 1px solid rgba(34, 211, 238, 0.35); border-radius: 2px; }
-.campo-ficha input:focus { outline: 1px solid var(--cy); border-color: var(--cy); }
+.campo-ficha input,
+.campo-ficha select { min-height: 28px; padding: 2px 6px; color-scheme: dark; font: inherit; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--cy); background: rgba(2, 5, 9, 0.55); border: 1px solid rgba(34, 211, 238, 0.35); border-radius: 2px; }
+.campo-ficha input:focus,
+.campo-ficha select:focus { outline: 1px solid var(--cy); border-color: var(--cy); }
+.campo-lentes select { min-width: 58px; cursor: pointer; }
 .campo-ficha input::placeholder { color: var(--tx-mute); font-weight: 400; }
 .campo-emo input { width: 108px; }
 .campo-area input { width: 108px; }
