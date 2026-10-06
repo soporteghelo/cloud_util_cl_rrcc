@@ -1,6 +1,6 @@
 /**
- * Genera el Word de autorizacion: arriba el fotocheck nuevo (10 cm de ancho
- * x 8 cm de alto) y debajo la foto del fotocheck antiguo.
+ * Genera el Word de autorizacion: arriba el fotocheck nuevo (10.9 cm de
+ * ancho x 8.6 cm de alto, ver MEDIDAS_WORD) y debajo la foto del fotocheck antiguo.
  *
  * Se arma el OOXML a mano con JSZip (que ya esta en el proyecto para los ZIP)
  * en vez de sumar la libreria `docx`: un .docx es un ZIP con cuatro XML, y de
@@ -12,9 +12,9 @@
  * porque Word usa el primero para el hueco en la pagina y el segundo para el
  * dibujo; si no coinciden, la imagen sale recortada.
  *
- * Las fechas del fotocheck (EMO y vencimiento de cada RRCC) no van en la
- * imagen sino en cuadros de texto flotantes encima de ella, en la misma
- * letra, para poder corregirlas en el Word sin rehacer el fotocheck.
+ * Las fechas del EMO, el uso de lentes y el vencimiento de cada RRCC no van
+ * en la imagen sino en cuadros de texto flotantes encima de ella, en la misma
+ * letra, para poder corregirlos en el Word sin rehacer el fotocheck.
  */
 
 import JSZip from "jszip";
@@ -114,7 +114,7 @@ function cuadroTexto(t, idDoc) {
     `<wp:extent cx="${ancho}" cy="${alto}"/>` +
     '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
     "<wp:wrapNone/>" +
-    `<wp:docPr id="${idDoc}" name="${escapar(t.nombre || "Fecha")}"/>` +
+    `<wp:docPr id="${idDoc}" name="${escapar(t.nombre || "Texto")}"/>` +
     "<wp:cNvGraphicFramePr/>" +
     '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
     "<wps:wsp>" +
@@ -247,20 +247,44 @@ export async function armarDocx(imagenes, tipo = "blob") {
 }
 
 /**
+ * Medidas del Word de autorizacion. El fotocheck va SIEMPRE a 10.9 x 8.6 cm,
+ * el tamano de los documentos oficiales: FOTOCHECK_ANCHO_CM y FOTOCHECK_ALTO_CM
+ * de la pestaña CONFIG ya no se usan (la hoja seguia con el 10 x 8 que puso
+ * `setup` y dejaba el Word en el tamano viejo). `antiguoAnchoCm` es el valor
+ * por defecto de ANTIGUO_ANCHO_CM, que si se sigue tomando de CONFIG.
+ */
+export const MEDIDAS_WORD = { fotocheckAnchoCm: 10.9, fotocheckAltoCm: 8.6, antiguoAnchoCm: 17 };
+
+/** Un largo en cm escrito en la hoja: acepta coma decimal ("11,5"); vacio o invalido, `porDefecto`. */
+function cm(valor, porDefecto) {
+  const n = Number(String(valor ?? "").trim().replace(",", "."));
+  return n > 0 ? n : porDefecto;
+}
+
+/** Las `medidas` de `armarAutorizacion`: el fotocheck fijo y el antiguo segun ANTIGUO_ANCHO_CM de CONFIG. */
+export function medidasWord(config = {}) {
+  return {
+    fotocheckAnchoCm: MEDIDAS_WORD.fotocheckAnchoCm,
+    fotocheckAltoCm: MEDIDAS_WORD.fotocheckAltoCm,
+    antiguoAnchoCm: cm(config?.ANTIGUO_ANCHO_CM, MEDIDAS_WORD.antiguoAnchoCm),
+  };
+}
+
+/**
  * El Word de autorizacion de una persona.
  *
- * - `fotocheck`: imagen del fotocheck nuevo. Va SIEMPRE a 10 x 8 cm, que es
- *   el tamano que hoy tienen los documentos oficiales. Si trae `textos` y
- *   `marco` (el `word` de `fotocheckImagen` con `conWord`), las fechas van
+ * - `fotocheck`: imagen del fotocheck nuevo, a `medidas` (`medidasWord`: 10.9
+ *   x 8.6 cm, el tamano de los documentos oficiales). Si trae `textos` y
+ *   `marco` (el `word` de `fotocheckImagen` con `conWord`), esos datos van
  *   encima como texto editable.
  * - `antiguo`: foto(s) del fotocheck viejo, ya combinadas lado a lado por
  *   `combinarFotocheckAntiguo`. Se respeta su proporcion, limitando el ancho
  *   (por defecto 17 cm, el ancho completo de la pagina entre margenes).
  */
 export async function armarAutorizacion({ fotocheck, antiguo = null, medidas = {}, tipo = "blob" }) {
-  const anchoFc = Number(medidas.fotocheckAnchoCm ?? 10);
-  const altoFc = Number(medidas.fotocheckAltoCm ?? 8);
-  const anchoMax = Number(medidas.antiguoAnchoCm ?? 17);
+  const anchoFc = cm(medidas.fotocheckAnchoCm, MEDIDAS_WORD.fotocheckAnchoCm);
+  const altoFc = cm(medidas.fotocheckAltoCm, MEDIDAS_WORD.fotocheckAltoCm);
+  const anchoMax = cm(medidas.antiguoAnchoCm, MEDIDAS_WORD.antiguoAnchoCm);
 
   const imagenes = [
     {
@@ -292,7 +316,7 @@ export async function armarAutorizacion({ fotocheck, antiguo = null, medidas = {
  * `y`, como los dibuja el canvas) a cuadros de texto en cm sobre la imagen
  * puesta a `anchoCm` x `altoCm`.
  *
- * El Word no respeta la proporcion del lienzo (1400 x 920 a 10 x 8 cm): la
+ * El Word no respeta la proporcion del lienzo (1400 x 920 a 10.9 x 8.6 cm): la
  * imagen sale estirada a lo alto y su letra tambien. Para que la del texto se
  * vea igual, el tamano sale del alto y el ancho de letra (`w:w`) de lo que
  * queda angosta respecto de ese alto.

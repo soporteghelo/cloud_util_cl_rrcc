@@ -265,7 +265,7 @@ vacío. Una fila sin `Cargo` vale como regla general de su `Area`. La
 | `UMBRAL_ACTUALIZAR` | 330 | días para avisar que toca renovar |
 | `A_SIN_CERT` | `MANTENER` | `MANTENER` o `DEGRADAR` (ver más abajo) |
 | `PLANTILLA_CARPETA` | — | ya no se usa: la carpeta de cada persona se llama solo con su DNI (las viejas con apellidos se reutilizan y se renombran) |
-| `FOTOCHECK_ANCHO_CM` / `FOTOCHECK_ALTO_CM` | 10 / 8 | tamaño del fotocheck en el Word |
+| `FOTOCHECK_ANCHO_CM` / `FOTOCHECK_ALTO_CM` | — | ya no se usan: el fotocheck del Word va siempre a 10.9 × 8.6 cm (`MEDIDAS_WORD` en `src/lib/docx.js`); si siguen en la hoja, se ignoran |
 | `ANTIGUO_ANCHO_CM` | 17 | ancho de la foto del fotocheck antiguo (anverso+reverso lado a lado); 17 cm es el ancho completo de la página entre márgenes |
 
 ---
@@ -345,9 +345,9 @@ RRCC/DATA/
     └── Autorizacion_RRCC_CCENCHO TAYPE NICOLAS.docx
 ```
 
-El Word lleva arriba el fotocheck nuevo a **10 cm de ancho × 8 cm de alto** y
-debajo la foto del fotocheck antiguo, respetando su proporción. Son las mismas
-medidas que tienen los documentos que se hacían a mano.
+El Word lleva arriba el fotocheck nuevo a **10.9 cm de ancho × 8.6 cm de alto**
+(fijo, en `MEDIDAS_WORD` de `src/lib/docx.js`) y debajo la foto del fotocheck
+antiguo, respetando su proporción (ancho máximo: `ANTIGUO_ANCHO_CM` de `CONFIG`).
 
 La carpeta se **reutiliza** si ya existe, y los archivos con el mismo nombre se
 actualizan en vez de duplicarse: se puede volver a correr una renovación sin

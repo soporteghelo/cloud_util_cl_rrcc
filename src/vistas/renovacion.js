@@ -34,7 +34,7 @@ import {
 import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 import { montarCursosDeCargo } from "./cursos-cargo.js";
-import { armarAutorizacion } from "../lib/docx.js";
+import { armarAutorizacion, medidasWord } from "../lib/docx.js";
 import { fotocheckImagen, nombreFotocheck, esImagenFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
 import { abrirFotocheck, actualizarFotocheck, cerrarFotocheck, fotocheckAbiertoDe } from "./fotocheck-modal.js";
 
@@ -960,11 +960,7 @@ export function montarRenovacion() {
     const docx = await armarAutorizacion({
       fotocheck: img.word,
       antiguo: ficha.antiguoManual || ficha.antiguo || null,
-      medidas: {
-        fotocheckAnchoCm: Number(contexto?.config?.FOTOCHECK_ANCHO_CM || 10),
-        fotocheckAltoCm: Number(contexto?.config?.FOTOCHECK_ALTO_CM || 8),
-        antiguoAnchoCm: Number(contexto?.config?.ANTIGUO_ANCHO_CM || 17),
-      },
+      medidas: medidasWord(contexto?.config),
     });
     const nombreBase = persona.nombreCompleto || persona.dni;
     return {

@@ -19,7 +19,7 @@ import { obtenerContexto, obtenerPersonal, obtenerPersona, anotarPersona } from 
 import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila, normalizarDocumento } from "../../shared/estados.js";
 import { CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { fotocheckImagen, nombreFotocheck } from "./fotocheck.js";
-import { armarAutorizacion, medirImagen } from "./docx.js";
+import { armarAutorizacion, medidasWord, medirImagen } from "./docx.js";
 
 export const MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -676,7 +676,7 @@ export function certificadosDeCarpeta(resultado, excluidos = null) {
  * Crea la carpeta de la persona en Drive y le deja dentro:
  *   - los certificados de los RRCC autorizados ("A") que siguen en vigor,
  *   - el PNG del fotocheck nuevo,
- *   - el Word con el fotocheck nuevo (10 x 8 cm) y la foto del antiguo.
+ *   - el Word con el fotocheck nuevo (10.9 x 8.6 cm) y la foto del antiguo.
  *
  * Todo lo que no depende entre si corre a la vez: la carpeta se crea
  * mientras bajan los PDF, los PDF bajan de a varios y el fotocheck y el Word
@@ -801,11 +801,7 @@ export async function generarSalidas(
     const docx = await armarAutorizacion({
       fotocheck: img.word,
       antiguo,
-      medidas: {
-        fotocheckAnchoCm: Number(ctx.config.FOTOCHECK_ANCHO_CM || 10),
-        fotocheckAltoCm: Number(ctx.config.FOTOCHECK_ALTO_CM || 8),
-        antiguoAnchoCm: Number(ctx.config.ANTIGUO_ANCHO_CM || 17),
-      },
+      medidas: medidasWord(ctx.config),
     });
     pasoZip("Word listo");
 

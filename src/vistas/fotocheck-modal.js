@@ -10,7 +10,7 @@
 
 import { $, descargarBlob } from "./comun.js";
 import { dibujarFotocheck, fotocheckImagen, nombreFotocheck, PROPORCION } from "../lib/fotocheck.js";
-import { armarAutorizacion } from "../lib/docx.js";
+import { armarAutorizacion, medidasWord } from "../lib/docx.js";
 
 /** { clave, persona, foto, antiguo, config } de lo que muestra el panel. */
 let actual = null;
@@ -90,11 +90,7 @@ export function montarModalFotocheck() {
     const docx = await armarAutorizacion({
       fotocheck: word,
       antiguo,
-      medidas: {
-        fotocheckAnchoCm: Number(config.FOTOCHECK_ANCHO_CM || 10),
-        fotocheckAltoCm: Number(config.FOTOCHECK_ALTO_CM || 8),
-        antiguoAnchoCm: Number(config.ANTIGUO_ANCHO_CM || 17),
-      },
+      medidas: medidasWord(config),
     });
     descargarBlob(docx, `Autorizacion_RRCC_${persona.nombreCompleto || persona.dni}.docx`);
   });

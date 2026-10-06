@@ -58,14 +58,15 @@ function texto(ctx, t, x, y, { tam = 20, negrita = false, color = "#000", alinea
 }
 
 /**
- * Una fecha del fotocheck (EMO o vencimiento de un RRCC). En el Word van como
- * texto editable encima de la imagen, para poder corregirlas alli sin rehacer
- * el fotocheck: con `editables` (un arreglo) no se dibuja, se anota en el con
- * su posicion y su letra (`y` es la linea base) para que el Word la ponga en
- * el mismo sitio. Sin valor tambien se anota: asi queda la casilla para escribirla.
+ * Un dato del fotocheck que se corrige en el Word (fechas del EMO, uso de
+ * lentes y vencimiento de cada RRCC). En el Word va como texto editable encima
+ * de la imagen, para poder corregirlo alli sin rehacer el fotocheck: con
+ * `editables` (un arreglo) no se dibuja, se anota en el con su posicion y su
+ * letra (`y` es la linea base) para que el Word lo ponga en el mismo sitio.
+ * Sin valor tambien se anota: asi queda la casilla para escribirlo.
  */
-function fecha(ctx, editables, nombre, iso, x, y, opciones) {
-  const valor = aFormatoCorto(iso);
+function editable(ctx, editables, nombre, t, x, y, opciones) {
+  const valor = String(t ?? "");
   if (!editables) return texto(ctx, valor, x, y, opciones);
   editables.push({
     nombre,
@@ -250,20 +251,20 @@ function panelIzquierdo(ctx, p, foto, logo, editables) {
   const etiqueta = dx + 12;
   const valor = dx + 292;
   const anchoValor = dw - 300;
-  // [etiqueta, valor, y, negrita, nombre si es una fecha editable en el Word]
+  // [etiqueta, valor, y, negrita, nombre si es editable en el Word]
   const filas = [
     ["Apellidos:", p.apellidos, 588, false],
     ["Nombres:", p.nombres, 625, true],
     ["Area:", p.area, 662, true],
     ["Cargo", p.cargo, 734, true],
-    ["F. Ex. Médico:", p.examenMedico, 806, true, "F. Ex. Medico"],
-    ["F. Vencimiento:", p.vencimientoEmo, 838, true, "F. Vencimiento EMO"],
-    ["Uso de Lentes:", p.usoLentes, 880, true],
+    ["F. Ex. Médico:", aFormatoCorto(p.examenMedico), 806, true, "F. Ex. Medico"],
+    ["F. Vencimiento:", aFormatoCorto(p.vencimientoEmo), 838, true, "F. Vencimiento EMO"],
+    ["Uso de Lentes:", p.usoLentes, 880, true, "Uso de Lentes"],
   ];
-  for (const [cab, val, y, negrita, nombreFecha] of filas) {
+  for (const [cab, val, y, negrita, nombreEditable] of filas) {
     texto(ctx, cab, etiqueta, y, { tam: 25, negrita: true });
     const letra = { tam: negrita ? 22 : 21, negrita, ancho: anchoValor };
-    if (nombreFecha) fecha(ctx, editables, nombreFecha, val, valor, y, letra);
+    if (nombreEditable) editable(ctx, editables, nombreEditable, val, valor, y, letra);
     else texto(ctx, val, valor, y, letra);
   }
 }
@@ -310,7 +311,7 @@ function panelDerecho(ctx, p, editables) {
         ctx.stroke();
         texto(ctx, r.tipo, xLetra + anchoLetra / 2, yCaja + 28, { tam: 24, negrita: true, alineado: "center" });
       }
-      fecha(ctx, editables, r.rotulo, r.venc, x + (anchoCol - anchoLetra) / 2, yCaja + 28, {
+      editable(ctx, editables, r.rotulo, aFormatoCorto(r.venc), x + (anchoCol - anchoLetra) / 2, yCaja + 28, {
         tam: 24,
         alineado: "center",
         ancho: anchoCol - anchoLetra - 8,
@@ -371,7 +372,8 @@ function panelDerecho(ctx, p, editables) {
 /**
  * Dibuja el fotocheck de una persona y devuelve el canvas.
  * `persona` es lo que devuelve `leerFila()` de estados.js. Con `editables`
- * (un arreglo) las fechas no se dibujan: se anotan en el (ver `fecha`).
+ * (un arreglo) los datos editables en el Word no se dibujan: se anotan en el
+ * (ver `editable`).
  */
 export async function dibujarFotocheck(
   persona,
@@ -400,7 +402,7 @@ export async function dibujarFotocheck(
  *
  * Antes era PNG a 3x (4200 x 2760 px, ~1.4 MB): lo mas pesado de cada
  * carpeta, y el Word lo llevaba adentro otra vez. En el Word se imprime a
- * 10 cm de ancho: 2x (2800 px) son ~700 dpi, de sobra para imprimir nitido, y
+ * ~11 cm de ancho: 2x (2800 px) son ~650 dpi, de sobra para imprimir nitido, y
  * JPEG con calidad alta pesa una fraccion del PNG sin que se note en el texto.
  */
 export const FOTOCHECK = { mime: "image/jpeg", ext: "jpg", escala: 2, calidad: 0.92 };
@@ -416,10 +418,11 @@ export const esImagenFotocheck = (nombre) => /^FOTOCHECK_.+\.(jpe?g|png)$/i.test
  * subir a Drive.
  *
  * Con `conWord`, ademas `word`: el `fotocheck` que pide `armarAutorizacion`.
- * Es la misma imagen pero sin las fechas (EMO y vencimiento de cada RRCC),
- * que el Word pone encima como texto editable (`textos`, en pixeles del
- * lienzo base `marco`). Se dibuja una sola vez: primero sin las fechas para
- * el Word, y luego se agregan sobre el mismo lienzo para la imagen suelta.
+ * Es la misma imagen pero sin los datos editables (fechas del EMO, uso de
+ * lentes y vencimiento de cada RRCC), que el Word pone encima como texto
+ * (`textos`, en pixeles del lienzo base `marco`). Se dibuja una sola vez:
+ * primero sin esos datos para el Word, y luego se agregan sobre el mismo
+ * lienzo para la imagen suelta.
  */
 export async function fotocheckImagen(persona, { conWord = false, ...opciones } = {}) {
   const editables = conWord ? [] : null;
@@ -429,9 +432,9 @@ export async function fotocheckImagen(persona, { conWord = false, ...opciones } 
 
   let word = null;
   if (editables) {
-    const sinFechas = await aBlob();
-    if (!sinFechas) throw fallo();
-    word = { datos: await sinFechas.arrayBuffer(), mime: FOTOCHECK.mime, textos: editables, marco: PROPORCION };
+    const sinEditables = await aBlob();
+    if (!sinEditables) throw fallo();
+    word = { datos: await sinEditables.arrayBuffer(), mime: FOTOCHECK.mime, textos: editables, marco: PROPORCION };
     const ctx = lienzo.getContext("2d");
     ctx.setTransform(lienzo.width / BASE_W, 0, 0, lienzo.height / BASE_H, 0, 0);
     for (const e of editables) texto(ctx, e.texto, e.x, e.y, e);

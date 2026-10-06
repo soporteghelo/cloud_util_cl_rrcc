@@ -62,8 +62,7 @@ const CONFIG_POR_DEFECTO = [
   // las carpetas de salida se llaman "<DNI>_<APELLIDOS NOMBRES>"
   ["PLANTILLA_CARPETA", "{DNI}_{APELLIDOS} {NOMBRES}"],
   ["PREFIJO_CODIGO", "AE"],
-  ["FOTOCHECK_ALTO_CM", 8],
-  ["FOTOCHECK_ANCHO_CM", 10],
+  // el fotocheck del Word va fijo a 10.9 x 8.6 cm (MEDIDAS_WORD en src/lib/docx.js)
   ["ANTIGUO_ANCHO_CM", 17],
 ];
 
