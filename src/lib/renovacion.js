@@ -782,8 +782,8 @@ export async function generarSalidas(
   let wordSubido = null;
   const armadoP = (async () => {
     const foto = await fotoP;
-    const img = await fotocheckImagen(persona, { foto });
-    const [imgBase64, imgBytes] = await Promise.all([blobABase64(img.blob), img.blob.arrayBuffer()]);
+    const img = await fotocheckImagen(persona, { foto, conWord: true });
+    const imgBase64 = await blobABase64(img.blob);
     const kb = (img.blob.size / 1024).toFixed(0);
     pasoZip("fotocheck listo");
     fotocheckSubido = subir({
@@ -799,7 +799,7 @@ export async function generarSalidas(
 
     const antiguo = await antiguoP;
     const docx = await armarAutorizacion({
-      fotocheck: { datos: imgBytes, mime: img.mime },
+      fotocheck: img.word,
       antiguo,
       medidas: {
         fotocheckAnchoCm: Number(ctx.config.FOTOCHECK_ANCHO_CM || 10),
@@ -896,7 +896,7 @@ export async function generarSalidas(
   // armados el fotocheck y el Word: se avisa YA, sin esperar a Drive.
   const zipP = Promise.all([descargasP, armadoP]).then(() => {
     if (senal?.aborted) return;
-    log(`ZIP listo: ${salida.archivos.length} certificado(s) + fotocheck + Word · Drive sigue subiendo`, "ok");
+    log(`ZIP listo: ${salida.archivos.length} certificado(s) + Word · Drive sigue subiendo`, "ok");
     try {
       alZipListo?.(salida);
     } catch {

@@ -35,7 +35,7 @@ import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 import { montarCursosDeCargo } from "./cursos-cargo.js";
 import { armarAutorizacion } from "../lib/docx.js";
-import { fotocheckImagen, nombreFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
+import { fotocheckImagen, nombreFotocheck, esImagenFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
 import { abrirFotocheck, actualizarFotocheck, cerrarFotocheck, fotocheckAbiertoDe } from "./fotocheck-modal.js";
 
 export function normalizarCambiosPendientes(ficha, contextoExtra = {}) {
@@ -736,7 +736,7 @@ export function montarRenovacion() {
   }
 
   /**
-   * El ZIP (certificados + fotocheck + Word) va por su cuenta y termina antes
+   * El ZIP (certificados + Word con el fotocheck) va por su cuenta y termina antes
    * que Drive: se arma con lo que ya esta en memoria, sin esperar las subidas.
    */
   function estadoZip(ficha) {
@@ -780,7 +780,7 @@ export function montarRenovacion() {
         tipo: "listo",
         destino: "ZIP",
         estado: "LISTO",
-        detalle: z.desdeDrive ? "se arma desde la carpeta de Drive" : "certificados + fotocheck + Word",
+        detalle: z.desdeDrive ? "se arma desde la carpeta de Drive" : "certificados + Word",
         accion: boton,
       });
     }
@@ -955,10 +955,10 @@ export function montarRenovacion() {
   async function documentosActuales(ficha) {
     const persona = personaVisible(ficha);
     const foto = ficha.foto || (await fotoDeDni(persona.dni).catch(() => null));
-    const img = await fotocheckImagen(persona, { foto });
+    const img = await fotocheckImagen(persona, { foto, conWord: true });
     const pngBlob = img.blob; // (el nombre quedo de cuando era PNG: es la imagen del fotocheck)
     const docx = await armarAutorizacion({
-      fotocheck: { datos: await pngBlob.arrayBuffer(), mime: img.mime },
+      fotocheck: img.word,
       antiguo: ficha.antiguoManual || ficha.antiguo || null,
       medidas: {
         fotocheckAnchoCm: Number(contexto?.config?.FOTOCHECK_ANCHO_CM || 10),
@@ -1250,12 +1250,11 @@ export function montarRenovacion() {
     };
 
     try {
+      // el fotocheck va solo dentro del Word, no como imagen suelta
       if (locales.length) {
-        total = 2 + FASE_ZIP;
-        mostrarProgreso(dni, "zip", { hecho: 0, total, texto: "armando fotocheck y Word…" });
+        total = 1 + FASE_ZIP;
+        mostrarProgreso(dni, "zip", { hecho: 0, total, texto: "armando el Word…" });
         const docs = await documentosActuales(ficha);
-        root.file(docs.nombreFotocheck, docs.pngBlob);
-        avanzar("fotocheck listo");
         root.file(docs.nombreWord, docs.docx);
         avanzar("Word listo");
         const fuera = nombresExcluidos(dni);
@@ -1266,7 +1265,7 @@ export function montarRenovacion() {
         await sincronizarSalidaEnDrive(dni);
         const lista = await drive({ accion: "listar", carpetaId: folderId });
         const fuera = nombresExcluidos(dni);
-        const archivos = (lista.archivos || []).filter((a) => !fuera.has(a.name));
+        const archivos = (lista.archivos || []).filter((a) => !fuera.has(a.name) && !esImagenFotocheck(a.name));
         total = archivos.length + FASE_ZIP;
         for (const archivo of archivos) {
           const r = await drive({ accion: "bajar", id: archivo.id });

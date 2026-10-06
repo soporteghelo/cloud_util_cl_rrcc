@@ -9,7 +9,7 @@
  */
 
 import { $, descargarBlob } from "./comun.js";
-import { dibujarFotocheck, fotocheckImagen, nombreFotocheck, FOTOCHECK, PROPORCION } from "../lib/fotocheck.js";
+import { dibujarFotocheck, fotocheckImagen, nombreFotocheck, PROPORCION } from "../lib/fotocheck.js";
 import { armarAutorizacion } from "../lib/docx.js";
 
 /** { clave, persona, foto, antiguo, config } de lo que muestra el panel. */
@@ -79,9 +79,9 @@ export function montarModalFotocheck() {
   $("fc-docx")?.addEventListener("click", async () => {
     if (!actual) return;
     const { persona, antiguo, config } = actual;
-    const blob = await enAlta();
+    const { word } = await fotocheckImagen(persona, { foto: actual.foto, conWord: true });
     const docx = await armarAutorizacion({
-      fotocheck: { datos: await blob.arrayBuffer(), mime: FOTOCHECK.mime },
+      fotocheck: word,
       antiguo,
       medidas: {
         fotocheckAnchoCm: Number(config.FOTOCHECK_ANCHO_CM || 10),
