@@ -47,12 +47,19 @@ async function dibujar() {
 /**
  * Abre el panel con esta persona. `clave` identifica a quien pertenece para
  * que solo sus cambios lo actualicen; `config` lleva las medidas del Word y
- * `antiguo` la foto del fotocheck viejo, si se pudo bajar de Drive.
+ * `antiguo` la foto del fotocheck viejo, si se pudo bajar de Drive. `vivo:
+ * false` quita la marca EN VIVO (VER RRCC muestra lo guardado, no una ficha
+ * que se este editando).
  */
-export async function abrirFotocheck(persona, { clave = persona.dni, foto = null, antiguo = null, config = {} } = {}) {
+export async function abrirFotocheck(
+  persona,
+  { clave = persona.dni, foto = null, antiguo = null, config = {}, vivo = true } = {}
+) {
   const panel = $("fc-modal");
   if (!panel || !$("fc-canvas")) return;
   actual = { clave, persona, foto, antiguo, config };
+  const marca = panel.querySelector(".fc-vivo");
+  if (marca) marca.hidden = !vivo;
   panel.hidden = false;
   await dibujar();
 }

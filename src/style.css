@@ -1238,6 +1238,7 @@ input[type="date"].inp { color-scheme: dark; }
 .ac-op mark { background: transparent; color: var(--gr); font-weight: 700; }
 .ac-op.activa, .ac-op:hover { background: rgba(34, 211, 238, 0.14); }
 .ac-vacio { padding: 6px 8px; color: var(--tx-dim); }
+.ac-n { float: right; margin-left: 10px; color: var(--tx-mute); font-size: 0.9em; }
 
 .matriz {
   display: grid;
@@ -2050,6 +2051,140 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 @media (max-width: 900px) {
   .ex-body { display: block; overflow: visible; }
   .ex-body #ex-resultados { overflow: visible; }
+}
+
+/* ==========================================================================
+   VER RRCC - el fotocheck de cada persona, filtrado, con Excel y ZIP
+   ========================================================================== */
+
+/* Botones de filtro que salen de los datos (situacion, ESTADO_FINAL,
+   guardia): se marcan por separado; sin ninguno marcado no se filtra. */
+.vr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.vr-chip { flex: 1 1 auto; min-height: 34px; padding: 6px 10px; font-size: 10.5px; letter-spacing: 0.08em; gap: 7px; }
+.vr-chip .vr-n { font-weight: 400; color: var(--tx-mute); }
+.vr-chip[aria-pressed="true"] { border-color: var(--cy); color: var(--cy); background: rgba(34, 211, 238, 0.1); }
+.vr-chip.vr-c-vigente[aria-pressed="true"] { border-color: var(--gr); color: var(--gr); background: rgba(0, 255, 156, 0.08); }
+.vr-chip.vr-c-vencido[aria-pressed="true"] { border-color: var(--rd); color: var(--rd); background: rgba(255, 77, 109, 0.08); }
+.vr-chip[aria-pressed="true"] .vr-n { color: inherit; opacity: 0.75; }
+.vr-chips-vacio { font-size: 10.5px; color: var(--tx-mute); }
+.vr-limpiar { align-self: flex-start; margin-left: 0; }
+.panel-go #vr-stop { width: 100%; margin-top: 9px; }
+.panel-go #vr-stop[hidden] { display: none; }
+
+/* el campo de cargo lleva sus sugerencias debajo, por encima del resto */
+.vr-cargo { position: relative; }
+/* los cargos ya elegidos, como etiquetas que se quitan con un clic; van
+   arriba del campo para que la lista de sugerencias no las tape */
+.vr-sel { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
+.vr-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 9px;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid var(--cy);
+  border-radius: 3px;
+  color: var(--cy);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  cursor: pointer;
+}
+.vr-tag span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vr-tag .vr-n { color: var(--tx-dim); }
+.vr-tag .vr-x { font-size: 13px; line-height: 1; color: var(--tx-dim); }
+.vr-tag:hover, .vr-tag:focus-visible { border-color: var(--rd); color: var(--rd); outline: none; }
+.vr-tag:hover .vr-x, .vr-tag:focus-visible .vr-x { color: var(--rd); }
+
+/* Riesgo critico: el desplegable se lleva el ancho y A / C van a su lado */
+.vr-riesgo-fila { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; }
+.vr-tipos { flex-wrap: nowrap; }
+.vr-tipos .vr-chip { flex: 0 0 auto; min-width: 58px; padding: 6px 8px; }
+
+/* como en EXPORTACION: solo la grilla desplaza */
+.vr-body { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.vr-body #vr-resultados {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* Tantos fotochecks por fila como entren a ~330 px: a esa medida todavia se
+   leen el nombre y las fechas sin abrirlo. */
+.vr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr)); gap: 12px; }
+
+.vr-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--r);
+  color: var(--tx);
+  font-family: var(--mono);
+  text-align: left;
+  cursor: zoom-in;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.vr-card:hover, .vr-card:focus-visible { border-color: var(--cy); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12); outline: none; }
+.vr-card.vr-c-vigente { border-left-color: var(--gr); }
+.vr-card.vr-c-vencido { border-left-color: var(--rd); }
+
+/* el hueco del fotocheck tiene su proporcion desde el principio: la grilla no
+   salta cuando las imagenes van llegando */
+.vr-img { position: relative; display: block; aspect-ratio: 1400 / 920; background: #0d1726; }
+.vr-img img { display: block; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.2s; }
+.vr-card.lista .vr-img img { opacity: 1; }
+.vr-card:not(.lista) .vr-img::after {
+  content: "dibujando…";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--tx-mute);
+}
+.vr-card.fallo:not(.lista) .vr-img::after { content: "no se pudo dibujar"; color: var(--rd); }
+
+.vr-pie {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 10px;
+  padding: 8px 10px 9px;
+  border-top: 1px solid var(--line-soft);
+}
+.vr-nom { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vr-meta { grid-column: 1; font-size: 9.5px; color: var(--tx-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vr-estado { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.vr-dias { font-size: 9.5px; color: var(--tx-dim); }
+.vr-sinfoto {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 1px 6px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--am);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 10px;
+}
+
+@media (max-width: 900px) {
+  .vr-body { display: block; overflow: visible; }
+  .vr-body #vr-resultados { overflow: visible; }
+  /* el resumen de vigentes/vencidos baja de linea antes que cortarse */
+  #vista-ver-rrcc .panel-res .panel-head { flex-wrap: wrap; row-gap: 4px; }
+  #vr-res-count { white-space: normal; }
 }
 
 /* ==========================================================================

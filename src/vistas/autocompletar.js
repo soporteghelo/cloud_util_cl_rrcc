@@ -79,8 +79,18 @@ export function resaltar(opcion, texto) {
  *    catalogo puede llegar despues de montar el campo).
  *  - Al elegir se escribe la opcion y se emiten `input` y `change`, como si se
  *    hubiera tecleado, para que el resto de la pantalla reaccione igual.
+ *  - `detalle(opcion)` agrega un texto al costado de cada sugerencia (p. ej.
+ *    cuantas personas tiene) sin que pase a formar parte de lo elegido.
+ *  - `textos` reemplaza los avisos pensados para la matriz por puesto:
+ *    `sinOpciones` (no hay ninguna) y `sinCoincidencias` (nada encaja).
+ *  - `alElegir(opcion)` es para elegir varias: lo elegido se le pasa a esa
+ *    funcion en vez de escribirse en el campo, la lista sigue abierta para
+ *    elegir la siguiente, y Enter con una sola coincidencia la elige.
  */
-export function autocompletar(campo, { obtener, nombre = "opciones", max = 60 } = {}) {
+export function autocompletar(
+  campo,
+  { obtener, nombre = "opciones", max = 60, detalle = null, textos = {}, alElegir = null } = {}
+) {
   const contenedor = campo.closest(".inp-borrable") || campo.parentElement;
   const lista = document.createElement("ul");
   lista.className = "ac-lista";
@@ -119,6 +129,12 @@ export function autocompletar(campo, { obtener, nombre = "opciones", max = 60 } 
   }
 
   function elegir(valor) {
+    if (alElegir) {
+      alElegir(valor);
+      if (document.activeElement === campo) abrir();
+      else cerrar();
+      return;
+    }
     eligiendo = true;
     campo.value = valor;
     campo.dispatchEvent(new Event("input", { bubbles: true }));
@@ -137,18 +153,25 @@ export function autocompletar(campo, { obtener, nombre = "opciones", max = 60 } 
     const resumen = texto.trim()
       ? todas.length
         ? `${encontradas.length} de ${todas.length} ${nombre}`
-        : `sin coincidencias en la matriz · se usará lo que escribas`
+        : textos.sinOpciones || `sin coincidencias en la matriz · se usará lo que escribas`
       : todas.length
         ? `${todas.length} ${nombre} · escribe para filtrar`
-        : `sin opciones en la matriz · escribe libremente`;
+        : textos.sinOpciones || `sin opciones en la matriz · escribe libremente`;
+    const extra = (o) => {
+      const d = detalle ? detalle(o) : "";
+      return d === "" || d === null || d === undefined ? "" : `<span class="ac-n">${escaparHtml(d)}</span>`;
+    };
     const resto = encontradas.length - mostradas.length;
     lista.innerHTML =
       `<li class="ac-info" role="presentation">${resumen}</li>` +
       (mostradas.length
         ? mostradas
-            .map((o, i) => `<li class="ac-op" role="option" id="${lista.id}-${i}" data-valor="${escaparHtml(o)}">${resaltar(o, texto)}</li>`)
+            .map(
+              (o, i) =>
+                `<li class="ac-op" role="option" id="${lista.id}-${i}" data-valor="${escaparHtml(o)}">${resaltar(o, texto)}${extra(o)}</li>`
+            )
             .join("")
-        : `<li class="ac-vacio" role="presentation">Sin coincidencias: se usará lo que escribas</li>`) +
+        : `<li class="ac-vacio" role="presentation">${escaparHtml(textos.sinCoincidencias || "Sin coincidencias: se usará lo que escribas")}</li>`) +
       (resto > 0 ? `<li class="ac-info" role="presentation">…y ${resto} más: sigue escribiendo</li>` : "");
     lista.hidden = false;
     campo.setAttribute("aria-expanded", "true");
@@ -181,6 +204,9 @@ export function autocompletar(campo, { obtener, nombre = "opciones", max = 60 } 
     } else if (ev.key === "Enter" && !lista.hidden && activa >= 0) {
       ev.preventDefault();
       elegir(mostradas[activa]);
+    } else if (ev.key === "Enter" && alElegir && !lista.hidden && mostradas.length === 1 && campo.value.trim()) {
+      ev.preventDefault();
+      elegir(mostradas[0]);
     } else if (ev.key === "Escape" && !lista.hidden) {
       ev.preventDefault();
       cerrar();

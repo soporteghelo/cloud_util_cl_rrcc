@@ -132,6 +132,14 @@ export function cargarImagen(fuente) {
   });
 }
 
+/** Algo que ya se puede pasar a drawImage tal cual, sin volver a cargarlo. */
+const yaCargada = (x) =>
+  (typeof HTMLImageElement !== "undefined" && x instanceof HTMLImageElement) ||
+  (typeof HTMLCanvasElement !== "undefined" && x instanceof HTMLCanvasElement) ||
+  (typeof ImageBitmap !== "undefined" && x instanceof ImageBitmap);
+
+const comoImagen = (x) => (yaCargada(x) ? Promise.resolve(x) : cargarImagen(x));
+
 /**
  * Junta 1 o 2 fotos del fotocheck antiguo (anverso y reverso del carnet
  * fisico) en una sola imagen para pegar en el Word. Con las dos, van lado a
@@ -379,10 +387,7 @@ export async function dibujarFotocheck(
   ctx.fillStyle = "#FFFFFF";
   ctx.fillRect(0, 0, BASE_W, BASE_H);
 
-  const [imgFoto, imgLogo] = await Promise.all([
-    foto instanceof HTMLImageElement ? foto : cargarImagen(foto),
-    cargarImagen(logo),
-  ]);
+  const [imgFoto, imgLogo] = await Promise.all([comoImagen(foto), comoImagen(logo)]);
 
   panelIzquierdo(ctx, persona, imgFoto, imgLogo, editables);
   panelDerecho(ctx, persona, editables);
@@ -438,3 +443,28 @@ export async function fotocheckImagen(persona, { conWord = false, ...opciones } 
 }
 
 export const PROPORCION = { ancho: BASE_W, alto: BASE_H };
+
+/** Recuadro de la foto en el lienzo base (ver `panelIzquierdo`). */
+const FOTO = { ancho: 256, alto: 288 };
+
+/**
+ * La foto achicada a lo que ocupa en el fotocheck en alta (FOTOCHECK.escala),
+ * como JPEG. Las fotos de FOTOS suelen ser de camara (varios MB): para ver
+ * cientos de fotochecks a la vez no se puede tener cada una entera en memoria,
+ * y el fotocheck no usa mas pixeles que estos. null si no se puede leer.
+ */
+export async function fotoReducida(fuente) {
+  const img = await comoImagen(fuente);
+  if (!img) return null;
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!w || !h) return null;
+  const escala = Math.min(1, Math.max((FOTO.ancho * FOTOCHECK.escala) / w, (FOTO.alto * FOTOCHECK.escala) / h));
+  const lienzo = document.createElement("canvas");
+  lienzo.width = Math.max(1, Math.round(w * escala));
+  lienzo.height = Math.max(1, Math.round(h * escala));
+  const ctx = lienzo.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+  return new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.9));
+}

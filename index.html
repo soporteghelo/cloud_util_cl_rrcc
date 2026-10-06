@@ -48,6 +48,9 @@
           <button class="tab" id="tab-manual" type="button" role="tab" aria-selected="false">
             MANUAL
           </button>
+          <button class="tab" id="tab-ver-rrcc" type="button" role="tab" aria-selected="false">
+            VER RRCC
+          </button>
         </nav>
 
         <div class="head-r">
@@ -925,6 +928,188 @@ Instrucciones:
 7. Al terminar, muéstrame una tabla "Antes → Después" y señala cualquier diferencia
    entre el nombre original del archivo y lo que dice el documento (posibles errores de tipeo).</pre>
               </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ============================================================= -->
+      <!-- VISTA 8 · VER RRCC (fotocheck de cada persona, Excel y ZIP)    -->
+      <!-- ============================================================= -->
+      <div class="vista" id="vista-ver-rrcc" hidden>
+        <div class="col col-in">
+          <section class="panel panel-obj">
+            <div class="panel-head">
+              <h2>01 · FILTROS</h2>
+              <span class="count" id="vr-count">0 personas</span>
+              <button
+                class="lnk lnk-recargar"
+                id="vr-recargar"
+                type="button"
+                title="Volver a traer el personal de la hoja y las fotos de FOTOS, ignorando lo ya cargado"
+                hidden
+              >
+                ↻ recargar
+              </button>
+            </div>
+            <div class="panel-body panel-body-col">
+              <label class="lbl" for="vr-buscar">Buscar (nombre, DNI, área, cargo)</label>
+              <input
+                class="inp"
+                id="vr-buscar"
+                type="search"
+                autocomplete="off"
+                placeholder="ej. LOPEZ, 71481337, MINA"
+              />
+
+              <div>
+                <label class="lbl">Estado final (ESTADO_FINAL)</label>
+                <div class="vr-chips" id="vr-estado-final" role="group" aria-label="Filtrar por ESTADO_FINAL"></div>
+              </div>
+
+              <div>
+                <label class="lbl">Guardia</label>
+                <div class="vr-chips" id="vr-guardia" role="group" aria-label="Filtrar por guardia"></div>
+              </div>
+
+              <div>
+                <label class="lbl" for="vr-cargo">Cargo</label>
+                <div class="vr-sel" id="vr-cargo-sel" aria-label="Cargos elegidos" hidden></div>
+                <div class="vr-cargo">
+                  <input
+                    class="inp"
+                    id="vr-cargo"
+                    type="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="escribe un cargo, ej. maestro mina"
+                    title="Filtra mientras escribes (sin importar tildes ni el orden de las palabras). Elige de la lista para agregarlo; se pueden elegir varios"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label class="lbl" for="vr-area-btn">Área</label>
+                <div class="msel" id="vr-area">
+                  <button class="inp msel-btn" id="vr-area-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="msel-txt">TODAS LAS ÁREAS</span>
+                    <span class="msel-car">▾</span>
+                  </button>
+                  <div class="msel-panel" role="listbox" aria-multiselectable="true" hidden></div>
+                </div>
+              </div>
+
+              <div>
+                <label class="lbl" for="vr-riesgo-btn">Riesgo crítico</label>
+                <div class="vr-riesgo-fila">
+                  <div class="msel" id="vr-riesgo">
+                    <button
+                      class="inp msel-btn"
+                      id="vr-riesgo-btn"
+                      type="button"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                      title="Solo los fotochecks donde aparece ese RRCC (con letra A/C o con fecha); con varios marcados, basta con uno"
+                    >
+                      <span class="msel-txt">TODOS LOS RRCC</span>
+                      <span class="msel-car">▾</span>
+                    </button>
+                    <div class="msel-panel" role="listbox" aria-multiselectable="true" hidden></div>
+                  </div>
+                  <div
+                    class="vr-chips vr-tipos"
+                    id="vr-tipos"
+                    role="group"
+                    aria-label="Filtrar por A (autorizado) o C (capacitado)"
+                    title="A: el RRCC está como AUTORIZADO · C: como CAPACITADO. Sin RRCC marcado, cualquiera con esa letra"
+                  ></div>
+                </div>
+              </div>
+
+              <button
+                class="lnk vr-limpiar"
+                id="vr-limpiar"
+                type="button"
+                title="Quitar todos los filtros (se sigue viendo solo al personal ACTIVO)"
+              >
+                restablecer filtros
+              </button>
+
+              <div class="avisos">
+                <div class="alert alert-info">
+                  Fotocheck de RRCC de cada persona, dibujado con lo que dice la hoja (el mismo que deja la renovación
+                  en Drive) y la foto de la carpeta <code>FOTOS</code>. Solo personal ACTIVO; cada botón de filtro
+                  se marca y desmarca con un clic. Haz clic en un fotocheck para verlo en grande y descargarlo.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-go">
+            <div class="panel-body">
+              <button class="btn btn-go" id="vr-cargar" type="button">
+                <span class="go-txt">CARGAR PERSONAL</span>
+                <span class="go-arrow">▸</span>
+              </button>
+              <div class="form-2">
+                <button
+                  class="btn btn-ghost"
+                  id="vr-excel"
+                  type="button"
+                  title="Descargar en Excel (.xlsx) la vigencia de la lista filtrada: una hoja por persona y otra con las fechas de cada RRCC"
+                  disabled
+                >
+                  EXCEL
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  id="vr-zip"
+                  type="button"
+                  title="Descargar un ZIP con el fotocheck (JPG en alta) de cada persona de la lista filtrada y un INDICE.xlsx con su vigencia"
+                  disabled
+                >
+                  ZIP FOTOCHECKS
+                </button>
+              </div>
+              <button
+                class="btn btn-ghost"
+                id="vr-certs"
+                type="button"
+                title="Elige uno o más RRCC en Riesgo crítico para bajar sus certificados"
+                disabled
+              >
+                CERTIFICADOS RRCC
+              </button>
+              <button class="btn btn-stop" id="vr-stop" type="button" hidden>ABORTAR</button>
+              <div class="bar-wrap" id="vr-bar-wrap" hidden>
+                <div class="bar"><div class="bar-fill" id="vr-bar-fill"></div></div>
+                <div class="bar-meta">
+                  <span id="vr-bar-txt">en espera</span>
+                  <span id="vr-bar-pct">0%</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col col-out">
+          <section class="panel panel-res">
+            <div class="panel-head">
+              <h2>02 · FOTOCHECKS</h2>
+              <span class="count" id="vr-res-count"></span>
+            </div>
+            <div class="panel-body vr-body">
+              <div id="vr-resultados"></div>
+            </div>
+          </section>
+
+          <section class="panel panel-term">
+            <div class="panel-head">
+              <h2>03 · CONSOLA</h2>
+              <button class="lnk" id="vr-log-clear" type="button">limpiar</button>
+            </div>
+            <div class="panel-body panel-body-flush">
+              <div class="term" id="vr-term" role="log" aria-live="polite"></div>
             </div>
           </section>
         </div>

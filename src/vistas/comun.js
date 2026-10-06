@@ -223,8 +223,12 @@ export function alMostrarse(idVista, fn) {
  * `opciones` es `[{ valor, etiqueta }]`. `resumen(opcion)` decide que texto
  * mostrar en el boton cuando hay una sola opcion marcada (por defecto, su
  * etiqueta); con varias marcadas se muestra "N SELECCIONADOS".
+ *
+ * `cambiarOpciones(nuevas)` reemplaza la lista (filtros que salen de los
+ * datos cargados, como cargo o area); lo marcado que ya no exista se suelta.
  */
-export function crearMultiSelect(idBase, opciones, { textoTodos = "TODOS", resumen = (op) => op.etiqueta } = {}) {
+export function crearMultiSelect(idBase, opcionesIniciales, { textoTodos = "TODOS", resumen = (op) => op.etiqueta } = {}) {
+  let opciones = opcionesIniciales || [];
   const raiz = $(idBase);
   const boton = $(`${idBase}-btn`);
   const panel = raiz?.querySelector(".msel-panel");
@@ -233,7 +237,7 @@ export function crearMultiSelect(idBase, opciones, { textoTodos = "TODOS", resum
   let alCambiar = () => {};
 
   if (!raiz || !boton || !panel || !texto) {
-    return { obtener: () => seleccion, alCambiar: (fn) => (alCambiar = fn) };
+    return { obtener: () => seleccion, alCambiar: (fn) => (alCambiar = fn), cambiarOpciones: () => {}, limpiar: () => seleccion.clear() };
   }
 
   function actualizarTexto() {
@@ -308,6 +312,21 @@ export function crearMultiSelect(idBase, opciones, { textoTodos = "TODOS", resum
   return {
     obtener: () => seleccion,
     alCambiar: (fn) => (alCambiar = fn),
+    cambiarOpciones(nuevas) {
+      opciones = nuevas || [];
+      for (const v of [...seleccion]) if (!opciones.some((o) => o.valor === v)) seleccion.delete(v);
+      // el panel se reconstruye entero: se conserva por donde iba el scroll
+      const scroll = panel.scrollTop;
+      render();
+      panel.scrollTop = scroll;
+      actualizarTexto();
+    },
+    /** Desmarca todo sin avisar (quien llama ya va a repintar). */
+    limpiar() {
+      seleccion.clear();
+      panel.querySelectorAll("input[type=checkbox]").forEach((c) => (c.checked = false));
+      actualizarTexto();
+    },
   };
 }
 
