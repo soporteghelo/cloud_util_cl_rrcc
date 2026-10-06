@@ -69,6 +69,14 @@ test("aIso entiende las tres formas en que llegan las fechas", () => {
   assert.equal(serialAIso(45947), "2025-10-17");
 });
 
+test("aIso entiende una fecha de Apps Script pasada por String()", () => {
+  assert.equal(aIso("Fri Oct 10 2025 02:00:00 GMT-0500 (Peru Standard Time)"), "2025-10-10");
+  // la medianoche de la hoja vista desde un script al oeste cae la noche anterior
+  assert.equal(aIso("Thu Oct 09 2025 22:00:00 GMT-0700 (Mountain Standard Time)"), "2025-10-10");
+  assert.equal(aIso("Sat Dec 30 1899 02:51:24 GMT-0508 (Peru Standard Time)"), "", "serial 0: formula vacia");
+  assert.equal(aFormatoCorto("Sat Oct 10 2026 02:00:00 GMT-0500 (Peru Standard Time)"), "10/10/2026");
+});
+
 test("aIso no inventa fechas cuando el dato no sirve", () => {
   assert.equal(aIso(""), "");
   assert.equal(aIso(null), "");

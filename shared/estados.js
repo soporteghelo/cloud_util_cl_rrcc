@@ -69,6 +69,20 @@ export function aIso(valor) {
     return dia && m[5] === "Z" && Number(m[4]) >= 13 ? sumarDias(dia, 1) : dia;
   }
 
+  // Una fecha de Apps Script pasada por String() ("Fri Oct 10 2025 02:00:00
+  // GMT-0500 (...)"), como llegaban las fechas personales del listado: la
+  // medianoche de la hoja vista en la zona del script. Si cae de tarde o de
+  // noche es que el script esta al oeste y el dia de la hoja es el siguiente,
+  // como con los instantes en UTC. El 30/12/1899 es el serial 0 (una formula
+  // vacia), no una fecha.
+  m = /^[A-Za-z]{3},? ([A-Za-z]{3}) (\d{1,2}) (\d{4}) (\d{2}):\d{2}(?::\d{2})? GMT[+-]\d{4}/.exec(t);
+  if (m) {
+    const mes = MESES_EN.indexOf(m[1].toLowerCase()) + 1;
+    if (!mes || Number(m[3]) < 1900) return "";
+    const dia = armar(m[3], mes, m[2]);
+    return dia && Number(m[4]) >= 12 ? sumarDias(dia, 1) : dia;
+  }
+
   // Serial de Excel. Se acota a partir de 1990 (32874) para que un "2026"
   // suelto no se interprete como serial.
   if (/^\d+(\.\d+)?$/.test(t)) {
@@ -78,6 +92,8 @@ export function aIso(valor) {
   }
   return "";
 }
+
+const MESES_EN = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 function armar(a, m, d) {
   const anio = Number(a);

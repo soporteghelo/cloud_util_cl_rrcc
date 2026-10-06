@@ -81,7 +81,7 @@ function hojaSimulada(nombre, columnas) {
   return hoja;
 }
 
-function cargar(hoja) {
+function cargar(hoja, servicios = {}) {
   const libro = { getSheets: () => [hoja], getSheetByName: () => null, getId: () => "x" };
   const cache = new Map();
   const sandbox = {
@@ -93,6 +93,7 @@ function cargar(hoja) {
     DriveApp: {},
     Utilities: {},
     Session: {},
+    ...servicios,
   };
   return vm.runInNewContext(`${CODIGO}\n;({ guardar, alta, listado, formulaEstado, CABECERA, DATOS, COL_ESTADO })`, sandbox);
 }
@@ -375,6 +376,26 @@ test("listado sin filtro trae a todos; con 'vencidos_activos' solo a quien esta 
 
   const filtrados = api.listado("vencidos_activos").personas;
   assert.deepEqual(filtrados.map((p) => p.dni).sort(), ["10000001", "10000004", "10000005"]);
+});
+
+test("listado entrega las fechas personales en ISO, no como String(fecha)", () => {
+  const hoja = hojaSimulada("BD_AESA", 98);
+  const api = cargar(hoja, {
+    Utilities: { formatDate: (d) => d.toISOString().slice(0, 10) },
+    Session: { getScriptTimeZone: () => "UTC" },
+  });
+  const f = filaDe(api, {
+    DNI: "10000006",
+    "F. Ex. Medico": new Date(Date.UTC(2025, 9, 10)),
+    "F. Vencimiento": new Date(Date.UTC(2026, 9, 10)),
+    "FECHA MINIMA": new Date(Date.UTC(2027, 6, 31)),
+  });
+  hoja.getRange(4, 1, 1, f.length).setValues([f]);
+
+  const [p] = api.listado().personas;
+  assert.equal(p.examenMedico, "2025-10-10");
+  assert.equal(p.vencimientoEmo, "2026-10-10");
+  assert.equal(p.fechaMinima, "2027-07-31");
 });
 
 test("listado con un filtro desconocido no filtra (compatibilidad hacia atras)", () => {
