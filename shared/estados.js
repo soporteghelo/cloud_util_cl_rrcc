@@ -565,15 +565,15 @@ export function renovarFila(opciones) {
     const venc = vencimientoDe(codigo, cap, cert, umbrales.vencido);
     const estado = estadoDe(cap, hoy, umbrales);
 
-    let tipo = tipoPrevio;
-    if (!tipo && cap) tipo = "C"; // capacitado, pero no autorizado
+    let tipo = tipoObligado(codigo, tipoPrevio);
+    if (!tipo && cap) tipo = tipoObligado(codigo, "C"); // capacitado, pero no autorizado
 
-    if (tipoPrevio === "A" && estado !== "VIGENTE") {
+    if (tipo === "A" && estado !== "VIGENTE") {
       const motivo = cap
         ? 'autorizado ("A") con capacitacion ' + estado.toLowerCase() + " — vence " + (venc || "?")
         : 'autorizado ("A") sin ninguna capacitacion registrada';
       alertas.push({ codigo, nivel: estado === "VENCIDO" ? "error" : "aviso", motivo });
-      if (modoA === "DEGRADAR" && estado === "VENCIDO") tipo = "C";
+      if (modoA === "DEGRADAR" && estado === "VENCIDO" && !SIEMPRE_A.includes(codigo)) tipo = "C";
     }
 
     nueva[iCap] = cap;
@@ -613,15 +613,30 @@ export function renovarFila(opciones) {
 }
 
 /**
+ * Riesgos que nunca van como "C": Excavacion Subterranea y Herramientas
+ * Manuales son siempre autorizacion ("A"). Un "C" (de la hoja, de la matriz o
+ * escrito a mano) se lleva a "A"; sin tipo siguen sin tipo.
+ */
+export const SIEMPRE_A = ["ES", "HM"];
+
+/** El tipo que corresponde guardar: "C" pasa a "A" en los de SIEMPRE_A. */
+export function tipoObligado(codigo, tipo) {
+  const t = String(tipo || "").trim().toUpperCase();
+  return t === "C" && SIEMPRE_A.includes(codigo) ? "A" : t;
+}
+
+/**
  * Riesgos a los que la capacitacion comun (C) NO se aplica: Instalaciones
  * Electricas, Animales Ponzoñosos, Oficial de Bloqueo, Montaje y Desmontaje y
  * Rigger. Se llevan aparte y se editan a mano en su tarjeta.
  */
 export const EXCLUIDOS_APLICAR_C = ["IE", "AP", "OB", "MD", "RIG"];
 
-/** ¿Puede un riesgo recibir la capacitacion C? No los autorizados (A) ni los excluidos. */
+/** ¿Puede un riesgo recibir la capacitacion C? No los autorizados (A), ni los excluidos, ni los que son siempre "A". */
 export function admiteAplicarC(codigo, tipo) {
-  return String(tipo || "").trim().toUpperCase() !== "A" && !EXCLUIDOS_APLICAR_C.includes(codigo);
+  return (
+    String(tipo || "").trim().toUpperCase() !== "A" && !EXCLUIDOS_APLICAR_C.includes(codigo) && !SIEMPRE_A.includes(codigo)
+  );
 }
 
 /**
@@ -640,7 +655,7 @@ export function aplicarCapacitacionC(fila, fecha, opciones = {}) {
   const nueva = copiarFila(fila);
 
   for (const { codigo } of RRCC) {
-    if (excluidos.has(codigo)) continue;
+    if (excluidos.has(codigo) || SIEMPRE_A.includes(codigo)) continue;
     if (solo && !solo.has(codigo)) continue;
     const iTipo = colTipo(codigo);
     if (String(nueva[iTipo] || "").trim().toUpperCase() === "A") continue;
@@ -688,7 +703,7 @@ export function aplicarEdicionesManuales(fila, ediciones, opciones = {}) {
     if (!CODIGOS_RRCC.includes(codigo) || !ed) continue;
 
     if (ed.tipo !== undefined) {
-      const tipo = String(ed.tipo || "").trim().toUpperCase();
+      const tipo = tipoObligado(codigo, ed.tipo);
       nueva[colTipo(codigo)] = tipo === "A" || tipo === "C" ? tipo : "";
     }
 
@@ -841,7 +856,7 @@ export function filaNueva(opciones) {
   poner("_EstaTE", datos.estadoTrabajador || "ACTIVO");
 
   for (const codigo of CODIGOS_RRCC) {
-    const t = String(tipos[codigo] || "").trim().toUpperCase();
+    const t = tipoObligado(codigo, tipos[codigo]);
     if (t === "A" || t === "C") fila[colTipo(codigo)] = t;
   }
   return fila;

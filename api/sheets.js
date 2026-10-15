@@ -15,6 +15,7 @@
  *   cargos    ->  cargos y areas distintos (para el formulario de alta)
  *   comprobar ->  contrasta la cabecera real de la hoja con la que espera el codigo
  *   setup     ->  crea las hojas auxiliares que falten y las siembra
+ *   enlace    ->  solo el id del Spreadsheet (link de SHEETS), sin tocar Google
  *
  * El calculo NO vive aca: lo hace `shared/estados.js`, que corre igual en el
  * navegador y en Node, para poder probarlo sin red ni credenciales.
@@ -274,6 +275,16 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
     const accion = String(body.accion || "").trim();
+
+    // El link de SHEETS solo necesita el id, y sale del entorno al instante.
+    // Pedirlo con `comprobar` pasaba por Apps Script, que abre la hoja entera:
+    // varios segundos, mas la espera detras de lo que la app estuviera
+    // cargando. Sin SHEET_ID va null y el navegador cae a `comprobar`.
+    if (accion === "enlace") {
+      res.status(200).json({ ok: true, spreadsheet: process.env.SHEET_ID || null });
+      return;
+    }
+
     const fn = ACCIONES[accion];
     if (!fn) {
       res.status(400).json({ error: `accion desconocida: "${accion}"`, disponibles: Object.keys(ACCIONES) });

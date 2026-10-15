@@ -39,6 +39,7 @@ import {
   guardiaDe,
   agruparPorGuardia,
   riesgosProblemaDe,
+  tipoObligado,
 } from "../shared/estados.js";
 import { CABECERA, INDICE, CODIGOS_RRCC, colCap, colVenc, colTipo, colEstado } from "../shared/rrcc.js";
 
@@ -827,4 +828,39 @@ test("agruparPorGuardia: A, B, C en orden, despues S/G y al final sin guardia, s
     ]
   );
   assert.deepEqual(agruparPorGuardia([]), []);
+});
+
+/* ------------------------------------------------------------------ */
+/* ES y HM: siempre "A"                                                */
+/* ------------------------------------------------------------------ */
+
+test("ES y HM son siempre A: un C pasa a A; los demas no cambian", () => {
+  assert.equal(tipoObligado("HM", "C"), "A");
+  assert.equal(tipoObligado("ES", "c"), "A");
+  assert.equal(tipoObligado("HM", ""), "");
+  assert.equal(tipoObligado("TA", "C"), "C");
+});
+
+test("renovarFila: HM en C (o con fecha y sin tipo) queda en A", () => {
+  const fila = filaVacia();
+  fila[colTipo("HM")] = "C";
+  fila[colCap("HM")] = "2026-05-01";
+  fila[colCap("ES")] = "2026-05-01";
+  fila[colCap("TA")] = "2026-05-01";
+  const r = renovarFila({ fila, items: [], hoy: HOY, diccionario: dic });
+  assert.equal(r.fila[colTipo("HM")], "A");
+  assert.equal(r.fila[colTipo("ES")], "A");
+  assert.equal(r.fila[colTipo("TA")], "C");
+});
+
+test("ediciones a mano y matriz: HM/ES no pueden quedar en C; aplicar C no los toca", () => {
+  const editada = aplicarEdicionesManuales(filaVacia(), { HM: { tipo: "C" }, ES: { tipo: "" } }, { hoy: HOY });
+  assert.equal(editada[colTipo("HM")], "A");
+  assert.equal(editada[colTipo("ES")], "");
+  assert.equal(filaNueva({ datos: {}, tipos: { ES: "C", TA: "C" } })[colTipo("ES")], "A");
+
+  const conC = aplicarCapacitacionC(filaVacia(), "2026-09-10", { hoy: HOY });
+  assert.equal(conC[colTipo("HM")], "");
+  assert.equal(conC[colCap("ES")], "");
+  assert.equal(admiteAplicarC("HM", "C"), false);
 });

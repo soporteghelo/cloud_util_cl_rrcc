@@ -242,26 +242,47 @@ export async function driveDescargar(id) {
   return buffer;
 }
 
-/**
- * Lee una foto publica de FOTOS sin pasar por Apps Script. Es importante para
- * la renovacion: Apps Script tenia que recorrer toda esa carpeta para cada
- * persona y terminaba respondiendo una pagina HTML por timeout.
- */
-async function carpetaFotosPublica(cfg) {
-  if (process.env.DRIVE_FOTOS_FOLDER_ID) return process.env.DRIVE_FOTOS_FOLDER_ID;
-  if (fotosFolderPromise) return fotosFolderPromise;
-
+/** La subcarpeta FOTOS de DRIVE_RRCC_FOLDER_ID, o null. */
+async function fotosDeRaiz(cfg) {
   const raiz = process.env.DRIVE_RRCC_FOLDER_ID;
   if (!raiz) return null;
   const q = `'${raiz}' in parents and trashed = false and name = 'FOTOS' and mimeType = '${MIME_CARPETA}'`;
   const url =
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}` +
     `&fields=${encodeURIComponent("files(id)")}&pageSize=1&key=${cfg.apiKey}`;
-  fotosFolderPromise = pedir(url).then(({ buffer, res }) => {
-    if (res.status !== 200) return null;
-    return JSON.parse(buffer.toString("utf8")).files?.[0]?.id || null;
+  const { buffer, res } = await pedir(url);
+  if (res.status !== 200) return null;
+  return JSON.parse(buffer.toString("utf8")).files?.[0]?.id || null;
+}
+
+/** Tras no dar con FOTOS, cuanto esperar antes de volver a preguntar (no martillar a Apps Script). */
+const ESPERA_TRAS_FALLO_MS = 60 * 1000;
+let fotosFalloHasta = 0;
+
+/**
+ * Lee una foto publica de FOTOS sin pasar por Apps Script. Es importante para
+ * la renovacion: Apps Script tenia que recorrer toda esa carpeta para cada
+ * persona y terminaba respondiendo una pagina HTML por timeout.
+ *
+ * La carpeta: DRIVE_FOTOS_FOLDER_ID, o la subcarpeta FOTOS de
+ * DRIVE_RRCC_FOLDER_ID, o lo que diga `respaldo` (en Vercel pueden faltar las
+ * dos variables: ahi se le pregunta UNA vez a Apps Script). Se recuerda por
+ * instancia, pero un fallo no: antes un null quedaba guardado y esa instancia
+ * contestaba "sin foto" a todo el mundo hasta apagarse.
+ */
+async function carpetaFotosPublica(cfg, respaldo) {
+  if (process.env.DRIVE_FOTOS_FOLDER_ID) return process.env.DRIVE_FOTOS_FOLDER_ID;
+  if (fotosFolderPromise) return fotosFolderPromise;
+  if (Date.now() < fotosFalloHasta) return null;
+
+  const p = (async () => (await fotosDeRaiz(cfg)) || (respaldo ? await respaldo() : null))().catch(() => null);
+  fotosFolderPromise = p;
+  p.then((id) => {
+    if (id || fotosFolderPromise !== p) return;
+    fotosFolderPromise = null;
+    fotosFalloHasta = Date.now() + ESPERA_TRAS_FALLO_MS;
   });
-  return fotosFolderPromise;
+  return p;
 }
 
 /**
@@ -286,10 +307,14 @@ export async function driveBajarPublico(id) {
   }
 }
 
-export async function driveFotoBuscar(dni) {
+/**
+ * La foto de un DNI en FOTOS por la lectura publica. `carpetaRespaldo`: como
+ * averiguar el id de FOTOS si el entorno no lo trae (ver carpetaFotosPublica).
+ */
+export async function driveFotoBuscar(dni, { carpetaRespaldo = null } = {}) {
   const cfg = configurado();
   if (!cfg) return null;
-  const carpeta = await carpetaFotosPublica(cfg);
+  const carpeta = await carpetaFotosPublica(cfg, carpetaRespaldo);
   if (!carpeta) return null;
 
   const limpio = String(dni ?? "").replace(/\D/g, "");

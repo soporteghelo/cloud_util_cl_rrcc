@@ -207,6 +207,16 @@ export function sheets(cuerpo, senal, { fondo = false } = {}) {
   return unoALaVez(() => (repetible ? conReintentos(pedido, senal) : pedido()), carril);
 }
 
+/**
+ * Solo el id del Spreadsheet, para el link de SHEETS. Va por fuera de la fila:
+ * el servidor lo contesta desde SHEET_ID sin llamar a Apps Script. null si el
+ * servidor no lo tiene configurado (ahi hay que preguntarlo con `comprobar`).
+ */
+export async function idSpreadsheet(senal) {
+  const r = await json("/api/sheets", { accion: "enlace" }, senal);
+  return r?.spreadsheet || null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Salidas en Google Drive                                             */
 /* ------------------------------------------------------------------ */

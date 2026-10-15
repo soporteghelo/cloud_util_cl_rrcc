@@ -13,7 +13,7 @@
 import "./style.css";
 import { desdeTexto, normalizarDni, normalizarLista } from "./lib/dni.js";
 import { extraerDocumentos } from "./lib/excel.js";
-import { buscar, descargar, sheets } from "./lib/api.js";
+import { buscar, descargar, sheets, idSpreadsheet } from "./lib/api.js";
 import { precargar } from "./lib/datos.js";
 import {
   EscritorCarpeta,
@@ -288,22 +288,62 @@ function mostrarLinkSheets(url) {
   el.btnSheets?.insertAdjacentElement("afterend", enlace);
 }
 
+/** El link que ya se obtuvo en este navegador: la proxima vez sale sin esperar a nadie. */
+const URL_SHEETS_GUARDADA = "rrcc.sheetsUrl";
+
+function urlSheetsGuardada() {
+  try {
+    return localStorage.getItem(URL_SHEETS_GUARDADA) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * El link a la base. Primero el atajo del servidor (`enlace`: SHEET_ID, sin
+ * Apps Script ni fila); si el servidor no tiene SHEET_ID se cae a `comprobar`,
+ * que si pasa por Apps Script y tarda. `soloAtajo` se queda en lo primero.
+ */
+async function pedirUrlSheets(senal, { soloAtajo = false } = {}) {
+  let id = await idSpreadsheet(senal).catch(() => null);
+  if (!id && !soloAtajo) id = (await sheets({ accion: "comprobar" }, senal)).spreadsheet;
+  if (!id) throw new Error("el servidor no devolvió el ID del Spreadsheet");
+  const url = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+  try {
+    localStorage.setItem(URL_SHEETS_GUARDADA, url);
+  } catch {
+    /* sin almacenamiento: solo se pierde el atajo */
+  }
+  return url;
+}
+
 el.btnSheets?.addEventListener("click", async () => {
+  // Se pide ya, mientras se escribe la contraseña: al aceptarla el link esta
+  // listo. Con uno guardado de antes alcanza el atajo, por si cambio la base.
+  const guardada = urlSheetsGuardada();
+  const corte = new AbortController();
+  const pedido = pedirUrlSheets(corte.signal, { soloAtajo: Boolean(guardada) });
+  pedido.catch(() => {});
+
   const clave = window.prompt("Contraseña para abrir la base en Google Sheets:");
-  if (clave === null) return; // cancelado
   if (clave !== CLAVE_SHEETS) {
-    notificar("Contraseña incorrecta", "No se abrió el Sheets.", "warn");
+    corte.abort(); // sin contraseña no hace falta seguir esperando a Apps Script
+    if (clave !== null) notificar("Contraseña incorrecta", "No se abrió el Sheets.", "warn");
+    return;
+  }
+
+  const listo = () => notificar("Enlace disponible", "Haz clic en el link para abrir la base en otra pestaña.", "ok");
+  if (guardada) {
+    mostrarLinkSheets(guardada);
+    listo();
+    pedido.then((url) => url !== guardada && mostrarLinkSheets(url), () => {});
     return;
   }
 
   el.btnSheets.disabled = true;
   try {
-    const r = await sheets({ accion: "comprobar" });
-    if (!r.spreadsheet) throw new Error("el servidor no devolvió el ID del Spreadsheet");
-
-    const url = `https://docs.google.com/spreadsheets/d/${r.spreadsheet}/edit`;
-    mostrarLinkSheets(url);
-    notificar("Enlace disponible", "Haz clic en el link para abrir la base en otra pestaña.", "ok");
+    mostrarLinkSheets(await pedido);
+    listo();
   } catch (e) {
     notificar("No se pudo abrir el Sheets", e.message, "warn");
   } finally {

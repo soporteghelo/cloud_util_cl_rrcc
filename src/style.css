@@ -2516,6 +2516,27 @@ button.pend-chip { cursor: pointer; }
 }
 .card-foto img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .card-foto-vacia { border-style: dashed; }
+/* se toca para reemplazar la foto: el lapiz queda siempre a la vista (en el celular no hay hover) */
+button.card-foto { position: relative; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+button.card-foto:hover,
+button.card-foto:focus-visible { border-color: var(--cy); outline: 1px solid var(--cy); outline-offset: 1px; }
+button.card-foto::after {
+  content: "✎";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  background: rgba(5, 9, 15, 0.82);
+  color: var(--cy);
+  font-size: 10px;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+button.card-foto:disabled { cursor: progress; }
+button.card-foto:disabled::after { display: none; }
 .card-foto-cargando,
 .rc-cert.cargando,
 .cert-buscando {
@@ -2677,3 +2698,32 @@ button.pend-chip { cursor: pointer; }
   /* telefonos muy angostos: ZIP arriba y DRIVE abajo */
   .ed-mitades { grid-template-columns: 1fr; }
 }
+
+/* ==========================================================================
+   RENOVAR AUTOMATICO (pestana RENOVACION): encima de RENOVAR AUTORIZACIONES
+   ========================================================================== */
+.rn-auto { display: flex; flex-direction: column; gap: 6px; }
+.btn-auto {
+  width: 100%;
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.16), rgba(34, 211, 238, 0.05));
+  border-color: var(--cy);
+  color: var(--cy);
+  font-size: 12.5px;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+  padding: 13px 14px;
+}
+.btn-auto:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.28), rgba(34, 211, 238, 0.1));
+  box-shadow: 0 0 26px rgba(34, 211, 238, 0.22);
+}
+/* corriendo: el mismo boton pasa a DETENER */
+.btn-auto.rn-auto-activo { border-color: var(--rd); color: var(--rd); background: rgba(255, 77, 109, 0.09); text-shadow: none; }
+.btn-auto.rn-auto-activo .go-arrow { display: none; }
+#vista-renovacion .col-in .btn-auto { font-size: 11px; letter-spacing: 0.08em; white-space: normal; }
+.rn-auto .check { margin: 0; font-size: 10.5px; }
+.rn-auto-carpeta { font-size: 10px; line-height: 1.45; color: var(--tx-dim); overflow-wrap: anywhere; }
+.rn-auto-carpeta:empty { display: none; }
+.rn-auto-carpeta b { color: var(--tx); font-weight: 600; }
+.rn-auto-carpeta .lnk { margin-left: 4px; font-size: 10px; }
+.ln-auto { opacity: 0.92; }

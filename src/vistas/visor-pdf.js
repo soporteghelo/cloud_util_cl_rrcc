@@ -14,7 +14,7 @@
 import { escaparHtml, descargarBlob } from "./comun.js";
 
 let pdfjsP = null;
-function cargarPdfjs() {
+export function cargarPdfjs() {
   pdfjsP ||= Promise.all([
     import("pdfjs-dist/legacy/build/pdf.mjs"),
     import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"),

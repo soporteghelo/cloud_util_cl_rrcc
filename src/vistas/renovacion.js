@@ -10,9 +10,27 @@
 
 import JSZip from "jszip";
 import { $, crearConsola, crearProgreso, notificar, pedirPermisoAviso, copiarTexto, estimarRestante, textoRestante, descargarBlob } from "./comun.js";
-import { montarPdf } from "./visor-pdf.js";
+import { montarPdf, cargarPdfjs } from "./visor-pdf.js";
 import { desdeTexto, normalizarLista } from "../lib/dni.js";
-import { extraerDocumentos } from "../lib/excel.js";
+import { extraerDocumentos, armarXlsx } from "../lib/excel.js";
+import {
+  CRITERIOS_AUTO,
+  EJECUCION_AUTO,
+  candidatosLaterales,
+  elegirCertificadoLateral,
+  planFechas,
+  planQuitar,
+  faltaActualizar,
+  fechaDeInduccion,
+  fechasDeCursosPdf,
+  textoFaltaActualizar,
+  nombreZipAuto,
+  erroresPorDni,
+  hojaDetalleAuto,
+  cursoVigente,
+  cortaDeIso,
+  hoyLocalIso,
+} from "../lib/renovacion.js";
 import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
 import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, certificadosDeRrcc, MIME_DOCX } from "../lib/renovacion.js";
@@ -30,12 +48,13 @@ import {
   admiteAplicarC,
   leerFila,
   normalizarLentes,
+  SIEMPRE_A,
 } from "../../shared/estados.js";
 import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 import { montarCursosDeCargo } from "./cursos-cargo.js";
 import { armarAutorizacion, medidasWord } from "../lib/docx.js";
-import { fotocheckImagen, nombreFotocheck, esImagenFotocheck, combinarFotocheckAntiguo } from "../lib/fotocheck.js";
+import { fotocheckImagen, nombreFotocheck, esImagenFotocheck, combinarFotocheckAntiguo, fotoReducida } from "../lib/fotocheck.js";
 import { abrirFotocheck, actualizarFotocheck, cerrarFotocheck, fotocheckAbiertoDe } from "./fotocheck-modal.js";
 
 export function normalizarCambiosPendientes(ficha, contextoExtra = {}) {
@@ -430,30 +449,45 @@ export function montarRenovacion() {
   }
 
   /**
-   * Si la carpeta FOTOS de Drive no tiene la foto de la persona, la tarjeta
-   * ofrece un boton para conseguirla: abre el mismo selector nativo que el
-   * fotocheck antiguo (sin "capture", asi que en el celular pregunta camara
-   * o galeria). La foto elegida se usa al toque en el fotocheck en pantalla
-   * y se sube a FOTOS/<dni>.png para que la proxima renovacion ya la
-   * encuentre sola. Si la persona ya tiene carpeta en Drive, el fotocheck y
+   * Foto de la persona elegida a mano: con "SIN FOTO · AGREGAR" si la carpeta
+   * FOTOS de Drive no la tiene, o tocando la foto de la cabecera para
+   * reemplazarla. Abre el mismo selector nativo que el fotocheck antiguo (sin
+   * "capture", asi que en el celular pregunta camara o galeria). Se achica a
+   * lo que usa el fotocheck: una foto de camara pesa varios MB y no entra en
+   * el pedido a Vercel. Se usa al toque en el fotocheck en pantalla y se sube
+   * a FOTOS/<dni>.png, que pisa a la anterior con ese nombre y es el primero
+   * que prueba la busqueda (antes que un .jpg viejo): la proxima renovacion ya
+   * la encuentra sola. Si la persona ya tiene carpeta en Drive, el fotocheck y
    * el Word se resuben de una vez.
    */
-  async function agregarFotoPersona(dni) {
+  async function cambiarFotoPersona(dni) {
+    if (!fichas.get(dni)?.persona) return;
+
+    const [elegida] = await elegirImagenes();
+    if (!elegida) return;
+    const archivo = await fotoReducida(elegida).catch(() => null);
+    if (!archivo) {
+      notificar("No se pudo leer la foto", "Elige una imagen JPG o PNG.", "warn");
+      return;
+    }
+
+    // la ficha pudo volver a pintarse mientras el selector estaba abierto
     const ficha = fichas.get(dni);
-    if (!ficha) return;
-
-    const [archivo] = await elegirImagenes();
-    if (!archivo) return;
-
+    if (!ficha?.persona) return;
+    const reemplazo = Boolean(ficha.foto);
     ficha.foto = archivo;
     ficha.fotoManual = archivo;
+    ficha.fotoResuelta = true; // si Apps Script todavia la buscaba, ya no hace falta
+    // el fotocheck y el Word de la carpeta llevan la foto: si la carpeta se
+    // esta armando ahora, al terminar se resube con esta
+    ficha.salidaDesactualizada = true;
     pintarFicha(dni, ficha);
     refrescarFotocheck(dni);
 
     try {
       await subirFoto(archivo, { nombre: `${dni}.png` });
-      consola(`  foto de ${dni} guardada en FOTOS/${dni}.png`, "ok");
-      await sincronizarSiHayCarpeta(dni, "Foto agregada.", {
+      consola(`  foto de ${dni} ${reemplazo ? "reemplazada" : "guardada"} en FOTOS/${dni}.png`, "ok");
+      await sincronizarSiHayCarpeta(dni, reemplazo ? "Foto reemplazada." : "Foto agregada.", {
         listo: "Foto lista",
         guardado: "Foto guardada",
         error: "Foto lista, pero no se pudo actualizar la carpeta",
@@ -1226,12 +1260,19 @@ export function montarRenovacion() {
    * por Apps Script. Es lento, por eso muestra cuanto falta.
    */
   async function descargarCarpetaUsuario(dni) {
+    const armado = await armarZipCarpeta(dni);
+    if (armado) descargarBlob(armado.blob, armado.nombre);
+  }
+
+  /** El ZIP de la carpeta, sin bajarlo: { blob, nombre } (null si no hay nada que juntar).
+      Lo usan DESCARGAR ZIP y RENOVAR AUTOMÁTICO, que lo guarda en su carpeta del día. */
+  async function armarZipCarpeta(dni) {
     const ficha = fichas.get(dni);
     const folderId = ficha?.salida?.carpetaId || ficha?.carpetaId;
     // un tipo A/C cambiado despues de armar la carpeta: el ZIP sale con lo de ahora
     if (ficha) await archivosAlDia(dni, ficha);
     const locales = ficha?.salida?.archivos || [];
-    if (!folderId && !locales.length) return;
+    if (!folderId && !locales.length) return null;
 
     const nombre = (ficha?.persona?.nombreCompleto || dni).replace(/[\\/:*?"<>|]+/g, " ").trim() || dni;
     const zip = new JSZip();
@@ -1277,14 +1318,7 @@ export function montarRenovacion() {
         const n = Math.round((meta.percent / 100) * FASE_ZIP);
         if (base + n > hecho) avanzar("juntando el ZIP…", base + n - hecho);
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${nombre}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return { blob, nombre: `${nombre}.zip` };
     } finally {
       mostrarProgreso(dni, "zip", null);
     }
@@ -1419,6 +1453,9 @@ export function montarRenovacion() {
     caja.classList.toggle("card-foto-cargando", !src && !datos.fotoResuelta);
     caja.classList.toggle("card-foto-vacia", !src && Boolean(datos.fotoResuelta));
     caja.innerHTML = src ? `<img src="${src}" alt="Foto" />` : "";
+    // la foto puede llegar despues de pintar la ficha: el texto se pone aca
+    caja.title = `Foto de la persona (carpeta FOTOS). Toca para ${src ? "reemplazarla" : "agregarla"} con la cámara o la galería`;
+    caja.setAttribute("aria-label", `${src ? "Reemplazar" : "Agregar"} la foto de la persona`);
   }
 
   function pintarFicha(dni, datos) {
@@ -1482,7 +1519,8 @@ export function montarRenovacion() {
             `<button type="button" class="cert-x" data-cert-x-rrcc="${r.codigo}" title="${tituloX}" aria-label="${tituloX}"${tipo === "A" ? "" : " hidden"}>${fuera ? "↺" : "×"}</button></div>`;
         }
 
-        const opciones = ["", "A", "C"];
+        // ES y HM son siempre "A": no se ofrece "C" (un "C" viejo de la hoja se sigue viendo)
+        const opciones = SIEMPRE_A.includes(r.codigo) ? ["", "A"] : ["", "A", "C"];
         if (tipo && !opciones.includes(tipo)) opciones.push(tipo);
         const selector =
           `<select class="${claseTipo(tipo)}" data-tipo="${r.codigo}" aria-label="Tipo de ${escaparHtml(r.rotulo)}" title="A autorizado · C capacitado">` +
@@ -1577,7 +1615,7 @@ export function montarRenovacion() {
     // cambios, para no perderlos de vista mientras se editan tarjetas de abajo
     card.innerHTML =
       `<div class="card-barra">` +
-      `<div class="card-id"><span class="card-foto${datos.fotoResuelta || datos.foto ? "" : " card-foto-cargando"}" data-foto-persona title="Foto de la persona (carpeta FOTOS)"></span>` +
+      `<div class="card-id"><button type="button" class="card-foto${datos.fotoResuelta || datos.foto ? "" : " card-foto-cargando"}" data-foto-persona="${dni}"></button>` +
       `<span class="card-dni">${persona.dni}</span>` +
       `<span class="item-meta">${persona.codigo || ""}</span>` +
       `<span class="card-n${datos.sinGuardar ? " card-n-error" : ""}" data-card-n>${textoEstadoFicha(datos)}</span>` +
@@ -1632,7 +1670,8 @@ export function montarRenovacion() {
         notificar("No se pudo guardar", fichas.get(dni)?.sinGuardar?.error || "vuelve a intentarlo en unos segundos", "warn");
       }
     });
-    card.querySelector("[data-agregar-foto]")?.addEventListener("click", () => agregarFotoPersona(dni));
+    card.querySelector("[data-agregar-foto]")?.addEventListener("click", () => cambiarFotoPersona(dni));
+    card.querySelector("[data-foto-persona]")?.addEventListener("click", () => cambiarFotoPersona(dni));
     card.querySelector("[data-antiguo-anverso]")?.addEventListener("click", () => elegirLadoAntiguo(dni, "anverso"));
     card.querySelector("[data-antiguo-reverso]")?.addEventListener("click", () => elegirLadoAntiguo(dni, "reverso"));
     card.querySelector("[data-antiguo-quitar]")?.addEventListener("click", () => quitarFotocheckAntiguo(dni));
@@ -2586,8 +2625,878 @@ export function montarRenovacion() {
     }
   }
 
+  /* ---------------- RENOVAR AUTOMATICO ---------------- */
+
+  /*
+   * El lote entero sin tocar nada: lo que hacia el robot de AUTO_RRCC desde
+   * afuera, hecho aca adentro. Lanza una corrida normal de RENOVAR
+   * AUTORIZACIONES con todos los DNI y, mientras corre, por cada persona:
+   *   1. apenas su ficha esta completa aplica los criterios (CRITERIOS_AUTO en
+   *      lib/renovacion.js) con los mismos controles de la tarjeta que se usan
+   *      a mano (fechas, tipo, "x") y pulsa GUARDAR CAMBIOS
+   *   2. apenas su ZIP esta armado (y la foto ya llego) lo guarda en
+   *      <carpeta elegida>/<dd.mm.aaaa>_RRCC, sin esperar a Drive; si el EMO o
+   *      VEM ("A") vencieron sale "... - FALTA ACTUALIZAR" con un .txt adentro
+   *   3. verifica que cada fecha cambiada quedo en la hoja (si no, vuelve a guardar)
+   *   4. al terminar la corrida confirma que Drive quedo GUARDADO y que su
+   *      carpeta tiene los mismos PDF que el ZIP
+   * Lo que no se pudo cerrar va a una vuelta nueva solo con esos DNI. Al final
+   * deja el Excel de detalle junto a los ZIP.
+   */
+  const auto = { activo: false, detener: false };
+  el.auto = $("rn-auto");
+  el.autoPrevia = $("rn-auto-previa");
+  el.autoCarpeta = $("rn-auto-carpeta");
+  el.term = $("rn-term");
+
+  class ReintentableAuto extends Error {}
+  class DefinitivoAuto extends Error {}
+
+  const FICHA_LISTA = new Set(["renovado", "sin guardar en la hoja", "consulta"]);
+  const E = EJECUCION_AUTO;
+  const cardDe = (dni) => el.resultados.querySelector(`[data-dni="${dni}"]`);
+
+  // Las lineas del modo automatico llevan `ln-auto`: asi no se mezclan con los
+  // errores de la corrida que se leen de la consola.
+  const logAuto = (texto, clase = "info", dni = "") => consola(`AUTO${dni ? ` [${dni}]` : ""} · ${texto}`, `${clase} ln-auto`);
+
+  /* Esperas con un reloj en un Worker: si la pestana queda de fondo, el
+     navegador estira los setTimeout de la pagina hasta 1 por minuto. */
+  let relojAuto;
+  function dormir(ms) {
+    if (relojAuto === undefined) {
+      relojAuto = null;
+      try {
+        const codigo = "onmessage=(e)=>setTimeout(()=>postMessage(e.data),e.data.ms)";
+        const w = new Worker(URL.createObjectURL(new Blob([codigo], { type: "text/javascript" })));
+        const esperas = new Map();
+        let n = 0;
+        w.onmessage = (ev) => {
+          esperas.get(ev.data.id)?.();
+          esperas.delete(ev.data.id);
+        };
+        relojAuto = (t) => new Promise((listo) => {
+          const id = ++n;
+          esperas.set(id, listo);
+          w.postMessage({ id, ms: t });
+        });
+      } catch {
+        /* sin Worker: setTimeout de siempre */
+      }
+    }
+    return relojAuto ? relojAuto(ms) : new Promise((listo) => setTimeout(listo, ms));
+  }
+
+  const conTiempo = (promesa, ms, motivo) =>
+    Promise.race([promesa, dormir(ms).then(() => Promise.reject(new ReintentableAuto(motivo)))]);
+
+  /* ---- carpeta de destino: <elegida>/<dd.mm.aaaa>_RRCC ---- */
+
+  // La carpeta elegida se recuerda (IndexedDB guarda el permiso del navegador):
+  // la proxima vez solo pide confirmarlo. Sin esta API (Firefox, Safari,
+  // celular) los ZIP van a las descargas normales del navegador.
+  const puedeElegirCarpeta = typeof window.showDirectoryPicker === "function";
+
+  function idbAuto() {
+    return new Promise((listo, falla) => {
+      const pedido = indexedDB.open("rrcc-auto", 1);
+      pedido.onupgradeneeded = () => pedido.result.createObjectStore("carpetas");
+      pedido.onsuccess = () => listo(pedido.result);
+      pedido.onerror = () => falla(pedido.error);
+    });
+  }
+  async function carpetaRecordada() {
+    try {
+      const db = await idbAuto();
+      return await new Promise((listo) => {
+        const q = db.transaction("carpetas").objectStore("carpetas").get("zip");
+        q.onsuccess = () => listo(q.result || null);
+        q.onerror = () => listo(null);
+      });
+    } catch {
+      return null;
+    }
+  }
+  async function recordarCarpeta(raiz) {
+    try {
+      (await idbAuto()).transaction("carpetas", "readwrite").objectStore("carpetas").put(raiz, "zip");
+    } catch {
+      /* sin almacenamiento: la proxima vez se vuelve a elegir */
+    }
+  }
+
+  const nombreCarpetaDia = () => {
+    const h = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return E.carpetaZip.replace("{fecha}", `${p(h.getDate())}.${p(h.getMonth() + 1)}.${h.getFullYear()}`);
+  };
+
+  function pintarCarpetaAuto(raiz) {
+    if (!el.autoCarpeta) return;
+    if (!puedeElegirCarpeta) {
+      el.autoCarpeta.textContent = "ZIP → descargas del navegador";
+      return;
+    }
+    el.autoCarpeta.innerHTML = raiz
+      ? `ZIP → <b>${escaparHtml(raiz.name)}</b>\\${escaparHtml(nombreCarpetaDia())} <button type="button" class="lnk" data-auto-cambiar>cambiar</button>`
+      : `ZIP → ${escaparHtml(nombreCarpetaDia())} dentro de la carpeta que elijas al empezar (p. ej. Descargas)`;
+  }
+
+  async function olvidarCarpeta() {
+    try {
+      (await idbAuto()).transaction("carpetas", "readwrite").objectStore("carpetas").delete("zip");
+    } catch {
+      /* sin almacenamiento: no hay nada que olvidar */
+    }
+  }
+
+  /** La carpeta del dia dentro de la elegida. Va dentro del clic: el navegador
+      solo pide permisos con un gesto del usuario. AbortError = cancelado.
+      Si la carpeta recordada ya no existe (borrada, movida, USB quitado) se
+      pide elegir otra en el mismo clic. */
+  async function carpetaDelDia({ cambiar = false } = {}) {
+    if (!puedeElegirCarpeta) return null;
+    let raiz = cambiar ? null : await carpetaRecordada();
+    if (raiz) {
+      let permiso = await raiz.queryPermission({ mode: "readwrite" }).catch(() => "denied");
+      if (permiso !== "granted") permiso = await raiz.requestPermission({ mode: "readwrite" }).catch(() => "denied");
+      if (permiso !== "granted") raiz = null;
+    }
+    if (raiz) {
+      try {
+        const dia = await raiz.getDirectoryHandle(nombreCarpetaDia(), { create: true });
+        pintarCarpetaAuto(raiz);
+        return dia;
+      } catch (e) {
+        if (e?.name === "AbortError") throw e;
+        const perdida = raiz.name;
+        raiz = null;
+        await olvidarCarpeta();
+        pintarCarpetaAuto(null);
+        notificar("La carpeta de los ZIP ya no existe", `"${perdida}" no se encontró: elige una carpeta nueva.`, "warn");
+      }
+    }
+    try {
+      raiz = await window.showDirectoryPicker({ id: "rrcc-zip", mode: "readwrite", startIn: "downloads" });
+    } catch (e) {
+      // el navegador solo abre el selector justo despues del clic: si se demoro, otro clic lo abre de una
+      if (e?.name === "SecurityError" || e?.name === "NotAllowedError") {
+        throw new Error("Vuelve a pulsar el botón para elegir la carpeta de los ZIP.");
+      }
+      throw e;
+    }
+    await recordarCarpeta(raiz);
+    pintarCarpetaAuto(raiz);
+    return raiz.getDirectoryHandle(nombreCarpetaDia(), { create: true });
+  }
+
+  /** Guarda un archivo en la carpeta del dia (o lo baja, sin carpeta). `reemplaza`:
+      nombres que este archivo deja sobrando (el ZIP del mismo DNI con/sin FALTA ACTUALIZAR). */
+  async function guardarAuto(destino, nombre, blob, reemplaza = []) {
+    if (!destino) {
+      descargarBlob(blob, nombre);
+      return;
+    }
+    for (const viejo of reemplaza) if (viejo !== nombre) await destino.removeEntry(viejo).catch(() => {});
+    const archivo = await destino.getFileHandle(nombre, { create: true });
+    const escritor = await archivo.createWritable();
+    await escritor.write(blob);
+    await escritor.close();
+  }
+
+  /* ---- lo que muestra la ficha ---- */
+
+  /** Los 18 RRCC, los paneles laterales y el EMO, tal como se ven en la tarjeta. */
+  function leerFichaAuto(dni) {
+    const card = cardDe(dni);
+    if (!card) return null;
+    const riesgos = [...card.querySelectorAll(".rc[data-codigo]")].map((rc) => {
+      const cert = rc.querySelector(".cert-fecha");
+      const fila = rc.querySelector(".rc-cert-fila");
+      return {
+        codigo: rc.dataset.codigo,
+        tipo: rc.querySelector("select[data-tipo]")?.value || "",
+        venc: rc.querySelector("input[data-venc]")?.value || "",
+        sinCert: Boolean(rc.querySelector(".rc-cert.falta")),
+        certVigencia: cert?.querySelector("b")?.textContent.trim() || "",
+        certCurso: cert?.querySelector("em")?.textContent.trim() || "",
+        certClave: fila?.dataset.certClave || "",
+        certExcluido: Boolean(fila?.classList.contains("excluido")),
+      };
+    });
+    const panel = (origen) =>
+      [...card.querySelectorAll(`.cert-panel.cert-${origen} .cert-fila`)].map((f) => ({
+        origen: origen.toUpperCase(),
+        clave: f.dataset.certClave || "",
+        curso: f.querySelector(".cert-item b")?.textContent.trim() || "",
+        fecha: f.querySelector(".cert-dia")?.textContent.trim() || "",
+        archivo: f.querySelector(".cert-item")?.getAttribute("title") || "",
+        descargable: !f.querySelector(".cert-item")?.disabled,
+        excluido: f.classList.contains("excluido"),
+      }));
+    return {
+      riesgos,
+      laterales: [...panel("ein"), ...panel("induccion")],
+      emo: card.querySelector("[data-emo-venc]")?.value || "",
+      nombre: [card.querySelector("[data-apellidos]")?.value, card.querySelector("[data-nombres]")?.value].filter(Boolean).join(" "),
+    };
+  }
+
+  /** En que va cada persona: ficha, ZIP, foto y Drive (lo mismo que pinta el aviso ZIP / DRIVE). */
+  function estadoAuto(dni) {
+    const ficha = fichas.get(dni);
+    if (!ficha) return { existe: false };
+    if (ficha.error) return { existe: true, error: cardDe(dni)?.querySelector(".card-nom")?.textContent.trim() || "error" };
+    const e = estadoDrive(dni, ficha);
+    return {
+      existe: true,
+      error: "",
+      estado: textoEstadoFicha(ficha),
+      cargando: Boolean(ficha.cargando),
+      zip: Boolean(e?.zip?.listo),
+      zipError: e?.tipo === "error" && !e?.zip?.listo,
+      foto: ficha.foto ? "ok" : ficha.fotoResuelta ? "sin-foto" : "cargando",
+      drive: !e ? "" : e.tipo === "error" ? "error" : e.tipo === "listo" ? "guardado" : "subiendo",
+    };
+  }
+
+  const lineasConsola = () =>
+    [...(el.term?.querySelectorAll(".ln:not(.ln-auto)") || [])].map((l) => ({ t: l.textContent, c: l.className }));
+
+  /* ---- acciones sobre la tarjeta (los mismos controles que a mano) ---- */
+
+  const disparar = (control, ...eventos) => eventos.forEach((t) => control.dispatchEvent(new Event(t, { bubbles: true })));
+
+  async function ponerVigenciaAuto(dni, codigo, iso) {
+    const campo = () => cardDe(dni)?.querySelector(`input[data-venc="${codigo}"]`);
+    for (let i = 0; i < 3 && campo(); i++) {
+      campo().value = iso;
+      disparar(campo(), "input", "change");
+      await dormir(200);
+      if (campo()?.value === iso) return;
+      await dormir(500);
+    }
+    throw new ReintentableAuto(`${codigo}: la fecha no quedó escrita (${campo()?.value || "vacía"} en vez de ${iso})`);
+  }
+
+  /** Cambia el tipo de un riesgo. A "–" la app tambien borra su vigencia. */
+  async function ponerTipoAuto(dni, codigo, tipo) {
+    const card = () => cardDe(dni);
+    const listo = () =>
+      card()?.querySelector(`select[data-tipo="${codigo}"]`)?.value === tipo &&
+      (tipo !== "" || card()?.querySelector(`input[data-venc="${codigo}"]`)?.value === "");
+    for (let i = 0; i < 3 && card(); i++) {
+      const selector = card().querySelector(`select[data-tipo="${codigo}"]`);
+      selector.value = tipo;
+      disparar(selector, "change");
+      await dormir(300);
+      if (listo()) return;
+      await dormir(500);
+    }
+    throw new ReintentableAuto(`${codigo}: no quedó en "${tipo || "–"}"`);
+  }
+
+  /** Texto de cada pagina del PDF, con la posicion de cada pedazo (para leer la tabla de cursos). */
+  async function paginasDePdf(bytes) {
+    const pdfjs = await cargarPdfjs();
+    // copia: pdf.js se queda con el buffer y el original vive en la cache de certificados
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes).slice() }).promise;
+    try {
+      const paginas = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const contenido = await (await doc.getPage(i)).getTextContent();
+        paginas.push({ items: contenido.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], ancho: it.width })) });
+      }
+      return paginas;
+    } finally {
+      doc.destroy();
+    }
+  }
+
+  /** Lee un certificado del panel lateral: { texto, fechas } (fechas = la de cada curso de su tabla). */
+  async function leerCertificadoAuto(dni, item) {
+    const cert = fichas.get(dni)?.inventario?.find((c) => claveCertificado(c) === item.clave);
+    if (!cert) throw new Error("no se encontró el certificado en la ficha");
+    let ultimo = "";
+    for (let intento = 1; intento <= E.reintentosPaso; intento++) {
+      try {
+        const r = await descargarCertificado(cert);
+        if (r.sinCertificado) throw new Error(r.motivo || "sin certificado emitido");
+        const paginas = await paginasDePdf(r.pdf);
+        return {
+          texto: paginas.map((p) => p.items.map((it) => it.str).join(" ")).join("\n"),
+          fechas: fechasDeCursosPdf(paginas, contexto?.diccionario),
+        };
+      } catch (e) {
+        ultimo = e.message;
+        logAuto(`no se pudo leer el PDF ${item.origen} ${item.curso} (${intento}): ${ultimo}`, "warn", dni);
+        await dormir(3000 * intento);
+      }
+    }
+    throw new Error(ultimo);
+  }
+
+  /**
+   * Los criterios sobre la ficha ya renovada, SIN guardar todavia (el ZIP ya
+   * sale con lo que se ve; el guardado se pulsa y se verifica aparte). En
+   * vista previa solo informa lo que haria.
+   */
+  async function aplicarCriteriosAuto(dni, consulta, hoy) {
+    const ficha = leerFichaAuto(dni);
+    if (!ficha) throw new ReintentableAuto("no se pudo leer la ficha");
+    const avisos = [];
+
+    // el certificado lateral que manda: el mas reciente y vigente entre
+    // RIESGOS CRITICOS (EIN) y las inducciones de Drive
+    // y de cada uno, la fecha de cada curso segun la tabla de su PDF
+    const candidatos = candidatosLaterales(ficha);
+    for (const c of candidatos) {
+      if (!c.leerPdf) continue;
+      let leido;
+      try {
+        leido = await leerCertificadoAuto(dni, c);
+      } catch (x) {
+        // la induccion no tiene otra fecha que la de su PDF: se reintenta en la
+        // vuelta siguiente. EIN conserva la fecha de su panel.
+        if (c.origen === "INDUCCION") throw new ReintentableAuto(`no se pudo leer el certificado de inducción: ${x.message}`);
+        avisos.push(`${c.origen} ${c.curso} ${c.fecha}: no se pudo leer el PDF (${x.message}): se usa la fecha del panel`);
+        continue;
+      }
+      c.fechas = leido.fechas;
+      if (c.origen === "INDUCCION") {
+        const { fecha, problema } = fechaDeInduccion(leido.texto, dni);
+        c.fechaIso = fecha;
+        if (problema) avisos.push(`inducción ${c.archivo || c.curso}: ${problema}`);
+      }
+    }
+    for (const c of candidatos) {
+      const tabla = Object.entries(c.fechas || {});
+      const deHmEs = ["ES", "HM"].map((k) => c.fechas?.[k] && `${k} ${cortaDeIso(c.fechas[k])}`).filter(Boolean).join(", ");
+      logAuto(
+        `candidato: ${c.origen} ${c.curso} ${cortaDeIso(c.fechaIso)}${cursoVigente(c.fechaIso, hoy) ? "" : " (NO vigente)"}` +
+          (tabla.length ? ` · tabla: ${tabla.length} cursos${deHmEs ? ` (${deHmEs})` : ""}` : c.leerPdf ? " · sin tabla de cursos" : ""),
+        "info",
+        dni
+      );
+    }
+    const elegido = elegirCertificadoLateral(candidatos, hoy);
+    if (elegido) logAuto(`elegido: ${elegido.origen} ${elegido.curso} ${cortaDeIso(elegido.fechaIso)}`, "info", dni);
+
+    const plan = planFechas(ficha, elegido, CRITERIOS_AUTO);
+    avisos.push(...plan.avisos);
+    const cambios = [...plan.cambios];
+    if (!consulta) {
+      for (const a of plan.acciones) {
+        if ("venc" in a) await ponerVigenciaAuto(dni, a.codigo, a.venc);
+        else await ponerTipoAuto(dni, a.codigo, a.tipo);
+      }
+    }
+
+    // las "x": se pulsan sobre la ficha ya editada (un "C" no tiene "x")
+    for (const q of planQuitar(leerFichaAuto(dni) || ficha, elegido, candidatos, CRITERIOS_AUTO)) {
+      if (!consulta) {
+        const card = cardDe(dni);
+        const boton = q.codigo
+          ? card?.querySelector(`[data-cert-x-rrcc="${q.codigo}"]`)
+          : [...(card?.querySelectorAll(".certificados-lateral .cert-fila") || [])].find((f) => f.dataset.certClave === q.clave)?.querySelector(".cert-x");
+        if (!boton || boton.hidden || boton.closest(".cert-fila")?.classList.contains("excluido")) continue;
+        boton.click();
+        await dormir(800);
+      }
+      cambios.push(q.texto);
+    }
+
+    const faltan = CRITERIOS_AUTO.marcarFaltaActualizar ? faltaActualizar(leerFichaAuto(dni) || ficha, hoy) : [];
+    return { cambios, avisos, faltan, nombre: ficha.nombre, esperadas: plan.esperadas };
+  }
+
+  /* ---- guardado en la hoja (verificado) ---- */
+
+  /** Pulsa GUARDAR CAMBIOS si hay cambios sin guardar (escribe la fila entera,
+      asi que tambien cubre una renovacion "sin guardar"), o SIN GUARDAR ·
+      REINTENTAR. Mientras la corrida sigue, la app misma reintenta las filas
+      "sin guardar" al terminar la lista: ahi va `permitirReintentar = false`. */
+  function empujarGuardadoAuto(dni, permitirReintentar) {
+    const card = cardDe(dni);
+    if (!card) return "";
+    const barraEd = card.querySelector("[data-edicion]");
+    const guardar = card.querySelector("[data-guardar-edicion]");
+    const reintentar = card.querySelector("[data-reintentar-guardado]");
+    const pendientes = Boolean(barraEd && !barraEd.hidden);
+    if (pendientes && guardar && !guardar.disabled) {
+      guardar.click();
+      return "GUARDAR CAMBIOS";
+    }
+    if (permitirReintentar && !pendientes && reintentar && !reintentar.disabled) {
+      reintentar.click();
+      return "SIN GUARDAR · REINTENTAR";
+    }
+    return "";
+  }
+
+  /** La hoja ya tiene todo: sin cambios pendientes, sin "sin guardar", y cada
+      fecha cambiada es la que se ve (tras guardar la ficha se repinta con la
+      fila releida de la hoja). Devuelve [ok, motivo]. */
+  function verificarGuardadoAuto(dni, esperadas) {
+    const card = cardDe(dni);
+    if (!card) return [false, "no se encuentra la ficha"];
+    const barraEd = card.querySelector("[data-edicion]");
+    if (barraEd && !barraEd.hidden) return [false, "cambios sin guardar"];
+    const estado = card.querySelector("[data-card-n]")?.textContent.trim() || "";
+    if (card.querySelector("[data-reintentar-guardado]") || estado === "guardando…" || estado === "sin guardar en la hoja") {
+      return [false, "fila sin guardar en la hoja"];
+    }
+    const distintas = [];
+    for (const [codigo, fecha] of Object.entries(esperadas)) {
+      const venc = card.querySelector(`input[data-venc="${codigo}"]`)?.value || "";
+      const tipo = card.querySelector(`select[data-tipo="${codigo}"]`)?.value || "";
+      if (venc !== (fecha || "")) distintas.push(`${codigo}: hoja ${venc || "vacía"} / debía ${fecha || "vacía"}`);
+      if (fecha === null && tipo) distintas.push(`${codigo}: hoja tipo ${tipo} / debía –`);
+    }
+    return distintas.length ? [false, `fecha distinta: ${distintas.join("; ")}`] : [true, ""];
+  }
+
+  /* ---- ZIP y Drive ---- */
+
+  /** Revisa el ZIP (que traiga el Word), le agrega FALTA ACTUALIZAR.txt si hace
+      falta y devuelve { blob, pdfs } (pdfs = nombres de los certificados adentro). */
+  async function prepararZipAuto(blob, dni, faltan) {
+    const zip = await JSZip.loadAsync(blob);
+    const nombres = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+    const word = nombres.find((n) => /\.docx$/i.test(n));
+    if (!word) throw new ReintentableAuto("el ZIP no trae el Word de autorización");
+    const pdfs = new Set(nombres.filter((n) => /\.pdf$/i.test(n)).map((n) => n.split("/").pop()));
+    if (!faltan.length) return { blob, pdfs };
+    const carpeta = word.includes("/") ? word.slice(0, word.lastIndexOf("/") + 1) : "";
+    zip.file(`${carpeta}FALTA ACTUALIZAR.txt`, "﻿" + textoFaltaActualizar(dni, faltan));
+    return { blob: await zip.generateAsync({ type: "blob", compression: "STORE" }), pdfs };
+  }
+
+  /** Guarda el ZIP de un DNI. En un lote tambien queda en `ctx.zips` para el ZIP
+      general del final; sin carpeta elegida, solo ahi (no una descarga por DNI). */
+  async function guardarZipAuto(dni, e, ctx) {
+    let ultimo = "";
+    for (let intento = 1; intento <= E.reintentosPaso; intento++) {
+      try {
+        const armado = await conTiempo(armarZipCarpeta(dni), E.esperaZipSeg * 1000, `el ZIP no se armó en ${E.esperaZipSeg} s`);
+        if (!armado) throw new ReintentableAuto("no hay carpeta ni certificados para el ZIP");
+        const { base, nombre } = nombreZipAuto(armado.nombre, dni, e.faltan);
+        const { blob, pdfs } = await prepararZipAuto(armado.blob, dni, e.faltan);
+        if (ctx.zips) ctx.zips.set(dni, { nombre, blob }); // la vuelta siguiente pisa la anterior
+        if (ctx.destino || !ctx.zips) await guardarAuto(ctx.destino, nombre, blob, [`${base}.zip`, `${base} - FALTA ACTUALIZAR.zip`]);
+        e.zipOk = true;
+        e.pdfsZip = pdfs;
+        e.resultado.zip = nombre;
+        return nombre;
+      } catch (x) {
+        ultimo = x.message;
+        logAuto(`el ZIP no se pudo guardar (${intento}): ${ultimo}`, "warn", dni);
+        await dormir(3000 * intento);
+      }
+    }
+    throw new ReintentableAuto(`no se pudo guardar el ZIP: ${ultimo}`);
+  }
+
+  /** La carpeta de Drive debe tener los mismos certificados que el ZIP: una "x"
+      pulsada mientras el PDF todavia se subia puede dejarlo ahi. Lo que sobre
+      va a la papelera (solo PDF). Devuelve un aviso, o "". */
+  async function conciliarDriveAuto(dni, pdfsZip) {
+    const ficha = fichas.get(dni);
+    const carpetaId = ficha?.salida?.carpetaId || ficha?.carpetaId;
+    if (!carpetaId) return "sin carpeta de Drive: no se pudo revisar";
+    try {
+      const lista = await drive({ accion: "listar", carpetaId });
+      const sobran = (lista.archivos || []).map((a) => a.name || "").filter((n) => /\.pdf$/i.test(n) && !pdfsZip.has(n)).sort();
+      if (sobran.length) {
+        await drive({ accion: "eliminar", carpetaId, nombres: sobran });
+        logAuto(`Drive: a la papelera lo que no va en el ZIP: ${sobran.join(", ")}`, "info", dni);
+      }
+      return "";
+    } catch (x) {
+      return `no se pudo revisar la carpeta de Drive (${x.message}): puede tener certificados quitados con la x`;
+    }
+  }
+
+  /* ---- la corrida ---- */
+
+  const nuevoEstadoAuto = (dni) => ({
+    dni, fin: false, fallo: "", ultimaVuelta: false, criteriosOk: false, esperadas: {}, faltan: [], avisos: [],
+    zipOk: false, pdfsZip: new Set(), zipVisto: 0, hojaOk: false, clics: 0, ultimoClic: 0, driveOk: false,
+    resultado: { dni, nombre: "", estado: "", zip: "", faltaActualizar: "", cambios: "", guardadoHoja: "", drive: "", avisos: "", intentos: 0 },
+  });
+
+  function cerrarAuto(e, estado, avisos = e.avisos) {
+    const r = e.resultado;
+    e.fin = true;
+    r.estado = estado;
+    r.avisos = avisos.filter(Boolean).join(" | ");
+    r.guardadoHoja = e.hojaOk ? "SI" : estado === "CONSULTADO" ? "" : "NO";
+    r.drive = e.driveOk ? "OK" : estado === "CONSULTADO" ? "" : "NO";
+    logAuto(`=> ${estado}`, estado.startsWith("OK") || estado === "CONSULTADO" ? "ok" : "err", e.dni);
+  }
+
+  /** Espera a que la pestana este libre y con BASE OK (sin base no se guarda nada). */
+  async function prepararCorridaAuto() {
+    if (corriendo) {
+      abortador?.abort();
+      for (let i = 0; i < 60 && corriendo; i++) await dormir(1000);
+      if (corriendo) throw new ReintentableAuto("la corrida anterior no terminó de abortarse");
+    }
+    const limite = Date.now() + E.esperaBaseOkSeg * 1000;
+    while (!/OK/.test(el.estadoBase?.textContent || "")) {
+      if (Date.now() > limite) throw new ReintentableAuto(`la base no respondió (${el.estadoBase?.textContent || "?"})`);
+      await comprobarBase();
+      if (!/OK/.test(el.estadoBase?.textContent || "")) await dormir(5000);
+    }
+  }
+
+  /**
+   * UNA corrida de la app con todos los DNI de `lista`. La app hace primero las
+   * fichas de todos y despues las carpetas de Drive una por una; aca se trabaja
+   * cada ficha apenas esta completa, se guarda su ZIP apenas esta armado y,
+   * cuando la corrida termina, se confirma la hoja y Drive de cada uno. Lo que
+   * no se pudo cerrar queda con `fallo` para la vuelta siguiente.
+   */
+  async function corridaAuto(lista, estados, ctx) {
+    await prepararCorridaAuto();
+    el.dnis.value = lista.join("\n");
+    refrescar();
+    ejecutar({ soloConsulta: ctx.consulta }).catch(() => {});
+    logAuto(`vuelta ${ctx.vuelta}: ${lista.length} DNI · ${ctx.consulta ? "VISTA PREVIA (no guarda nada)" : "renovando y aplicando los criterios"}`, "head");
+
+    const maxClics = E.reintentosPaso + 1;
+    let ultimoCambio = Date.now();
+    let firmaPrevia = "";
+    let finCorrida = 0;
+    let detenido = false;
+
+    for (;;) {
+      if (auto.detener && !detenido) {
+        detenido = true;
+        logAuto("DETENER: se aborta la corrida; se cierran los DNI que ya estaban en marcha", "warn");
+        if (corriendo) abortador?.abort();
+      }
+      const enCurso = corriendo;
+
+      for (const dni of lista) {
+        const e = estados.get(dni);
+        if (e.fin || e.fallo) continue;
+        const s = estadoAuto(dni);
+        try {
+          if (s.error) {
+            if (/no est[aá] en la base/i.test(s.error)) cerrarAuto(e, "ERROR", ["no está en la base (usar NUEVO PERSONAL)"]);
+            else if (!enCurso) e.fallo = `la ficha salió con error: ${s.error}`;
+            continue; // mientras corre, la app la reintenta al terminar la lista
+          }
+
+          // 1. ficha completa -> criterios, "x" y GUARDAR CAMBIOS (sin esperar)
+          if (!e.criteriosOk && FICHA_LISTA.has(s.estado) && !s.cargando) {
+            ctx.contador.n++;
+            logAuto(`---- ${ctx.contador.n} · ficha lista (${s.estado}) ----`, "head", dni);
+            const r = await aplicarCriteriosAuto(dni, ctx.consulta, ctx.hoy);
+            Object.assign(e, { criteriosOk: true, esperadas: r.esperadas, faltan: r.faltan, avisos: [...r.avisos] });
+            Object.assign(e.resultado, { nombre: r.nombre, cambios: r.cambios.join(" | "), faltaActualizar: r.faltan.join(" | ") });
+            for (const c of r.cambios) logAuto(`${ctx.consulta ? "haría" : "hecho"}: ${c}`, "ok", dni);
+            for (const a of r.avisos) logAuto(`aviso: ${a}`, "warn", dni);
+            for (const f of r.faltan) logAuto(`FALTA ACTUALIZAR: ${f}`, "warn", dni);
+            if (ctx.consulta) {
+              cerrarAuto(e, "CONSULTADO");
+              continue;
+            }
+            if (empujarGuardadoAuto(dni, !corriendo)) {
+              e.clics++;
+              e.ultimoClic = Date.now();
+            }
+          }
+          if (!e.criteriosOk) continue;
+
+          // 2. ZIP armado -> se guarda ya (sale con las fechas editadas y sin lo
+          //    quitado con la "x"), pero con la foto puesta: el Word se arma al
+          //    juntar el ZIP con la foto que haya en ese momento
+          if (!e.zipOk && s.zip) {
+            e.zipVisto ||= Date.now();
+            if (s.foto !== "cargando" || Date.now() - e.zipVisto > E.esperaFotoSeg * 1000) {
+              const nombre = await guardarZipAuto(dni, e, ctx);
+              if (s.foto === "sin-foto") e.avisos.push("SIN FOTO en el fotocheck: no está en la carpeta FOTOS de Drive (agregarla con SIN FOTO · AGREGAR)");
+              else if (s.foto === "cargando") e.avisos.push(`SIN FOTO en el fotocheck: la foto no llegó a la app en ${E.esperaFotoSeg} s`);
+              logAuto(`ZIP guardado: ${nombre}`, "ok", dni);
+            }
+          } else if (!e.zipOk && s.zipError) {
+            e.fallo = "no se pudo armar el ZIP";
+            continue;
+          }
+
+          // 3. hoja: cada fecha cambiada tiene que quedar guardada y verificada
+          if (!e.hojaOk) {
+            const [ok, motivo] = verificarGuardadoAuto(dni, e.esperadas);
+            if (ok) {
+              e.hojaOk = true;
+              const codigos = Object.keys(e.esperadas);
+              logAuto(`hoja: guardado y verificado${codigos.length ? ` (${codigos.join(", ")})` : ""}`, "ok", dni);
+            } else if (Date.now() - e.ultimoClic > E.esperaEntreGuardadosSeg * 1000) {
+              // tras guardar, la ficha se repinta y el boton vuelve a verse
+              // habilitado aunque el guardado siga en vuelo: se da un margen
+              const pulsado = empujarGuardadoAuto(dni, !corriendo);
+              if (pulsado) {
+                e.clics++;
+                e.ultimoClic = Date.now();
+                if (e.clics > maxClics) {
+                  e.fallo = `la hoja no guardó tras ${e.clics - 1} intentos (${motivo})`;
+                  continue;
+                }
+                if (e.clics > 1) logAuto(`hoja: ${motivo} -> ${pulsado} (intento ${e.clics})`, "warn", dni);
+              }
+            }
+          }
+
+          // 4. Drive: cuando la corrida termino y su carpeta quedo GUARDADA
+          if (!corriendo && e.zipOk && !e.driveOk) {
+            if (s.drive === "error") {
+              e.fallo = "Drive no se pudo guardar";
+              continue;
+            }
+            if (s.drive === "guardado") {
+              const problema = await conciliarDriveAuto(dni, e.pdfsZip);
+              if (problema) e.avisos.push(problema);
+              e.driveOk = true;
+              logAuto("Drive: guardado", "ok", dni);
+            }
+          }
+
+          if (e.zipOk && e.hojaOk && e.driveOk) cerrarAuto(e, e.avisos.length ? "OK CON AVISOS" : "OK");
+        } catch (x) {
+          if (x instanceof DefinitivoAuto) cerrarAuto(e, "ERROR", [...e.avisos, x.message]);
+          else {
+            e.fallo = String(x.message || x).split("\n")[0];
+            logAuto(`fallo: ${e.fallo}`, "err", dni);
+          }
+        }
+      }
+
+      const abiertos = () => lista.filter((d) => !estados.get(d).fin && !estados.get(d).fallo);
+      if (!enCurso) {
+        if (!finCorrida) {
+          finCorrida = Date.now();
+          // certificados que no bajaron / no subieron (EIN intermitente): otra vuelta
+          for (const [dni, errs] of Object.entries(erroresPorDni(lineasConsola()))) {
+            const e = estados.get(dni);
+            if (!e || e.fin || e.fallo) continue;
+            e.avisos.push(`${errs.length} certificado(s) con error: ${errs[0]}`);
+            if (E.reintentarSiFaltaCertificado && !e.ultimaVuelta) e.fallo = `${errs.length} certificado(s) no bajaron/subieron: ${errs[0]}`;
+          }
+        }
+        for (const dni of abiertos()) {
+          const e = estados.get(dni);
+          if (e.criteriosOk) continue;
+          if (detenido) cerrarAuto(e, "NO PROCESADO", ["detenido antes de terminar su ficha"]);
+          else e.fallo = "la corrida terminó sin su ficha completa";
+        }
+        // detenido no se espera los 10 minutos de Drive: lo que falte queda sin confirmar
+        const espera = detenido ? 60 : E.esperaDriveSeg;
+        if (abiertos().length && Date.now() - finCorrida > espera * 1000) {
+          for (const dni of abiertos()) {
+            const e = estados.get(dni);
+            const que = [!e.zipOk && "ZIP", !e.hojaOk && "hoja", !e.driveOk && "Drive"].filter(Boolean);
+            e.fallo = `sin confirmar en ${espera} s: ${que.join(", ")}`;
+          }
+        }
+      }
+      if (!abiertos().length) return;
+
+      // sin ningun avance (consola, fichas, ZIP, Drive) durante mucho rato: la corrida se colgo
+      const firma = JSON.stringify([
+        el.term?.childElementCount || 0,
+        lista.map((d) => {
+          const e = estados.get(d);
+          return [estadoAuto(d), e.criteriosOk, e.zipOk, e.hojaOk];
+        }),
+      ]);
+      if (firma !== firmaPrevia) {
+        firmaPrevia = firma;
+        ultimoCambio = Date.now();
+      } else if (Date.now() - ultimoCambio > E.sinAvanceSeg * 1000) {
+        if (corriendo) abortador?.abort();
+        throw new ReintentableAuto(`la corrida no avanza hace ${E.sinAvanceSeg} s`);
+      }
+      await dormir(1500);
+    }
+  }
+
+  async function renovarAutomatico(dnis, { consulta, destino }) {
+    auto.activo = true;
+    auto.detener = false;
+    el.auto.classList.add("rn-auto-activo");
+    el.auto.querySelector(".go-txt").textContent = "DETENER AUTOMÁTICO";
+    el.autoPrevia.disabled = true;
+    const avisarSalida = (ev) => {
+      ev.preventDefault();
+      ev.returnValue = "";
+    };
+    window.addEventListener("beforeunload", avisarSalida);
+    let candado = null;
+    try {
+      candado = await navigator.wakeLock?.request("screen"); // que la PC no se suspenda a mitad del lote
+    } catch {
+      /* sin bloqueo de pantalla: sigue igual */
+    }
+
+    const hoy = hoyLocalIso();
+    const estados = new Map(dnis.map((d) => [d, nuevoEstadoAuto(d)]));
+    // con varios DNI, cada ZIP queda tambien aca para el ZIP general del final
+    const zips = dnis.length > 1 && !consulta ? new Map() : null;
+    const ctx = { consulta, destino, hoy, contador: { n: 0 }, vuelta: 0, zips };
+    try {
+      for (let vuelta = 1; vuelta <= E.vueltas; vuelta++) {
+        const lista = dnis.filter((d) => !estados.get(d).fin);
+        if (!lista.length || auto.detener) break;
+        for (const d of lista) {
+          // vuelta nueva = renovacion nueva: la ficha se trabaja desde cero
+          const nuevo = nuevoEstadoAuto(d);
+          nuevo.resultado.intentos = estados.get(d).resultado.intentos + 1;
+          nuevo.ultimaVuelta = vuelta === E.vueltas;
+          estados.set(d, nuevo);
+        }
+        if (vuelta > 1) {
+          const espera = E.esperaEntreVueltasSeg * (vuelta - 1);
+          logAuto(`VUELTA ${vuelta}/${E.vueltas}: ${lista.length} DNI por reintentar en ${espera} s: ${lista.join(", ")}`, "warn");
+          await dormir(espera * 1000);
+          if (auto.detener) break;
+        }
+        ctx.vuelta = vuelta;
+        try {
+          await corridaAuto(lista, estados, ctx);
+        } catch (x) {
+          const motivo = String(x.message || x).split("\n")[0];
+          logAuto(`fallo de la corrida: ${motivo}`, "err");
+          for (const d of lista) {
+            const e = estados.get(d);
+            if (!e.fin && !e.fallo) e.fallo = motivo;
+          }
+        }
+        for (const d of lista) {
+          const e = estados.get(d);
+          if (e.fin) continue;
+          if (vuelta < E.vueltas && !auto.detener) logAuto(`queda para la vuelta siguiente: ${e.fallo}`, "warn", d);
+          else cerrarAuto(e, e.zipOk ? "ZIP OK, HOJA/DRIVE SIN CONFIRMAR" : "ERROR", [...e.avisos, e.fallo]);
+        }
+      }
+
+      const resultados = dnis.map((d) => {
+        const e = estados.get(d);
+        const r = e.resultado;
+        if (!e.fin) {
+          Object.assign(r, e.zipOk
+            ? { estado: "ZIP OK, HOJA/DRIVE SIN CONFIRMAR", avisos: [...e.avisos, "detenido antes de confirmar la hoja y Drive"].join(" | ") }
+            : { estado: "NO PROCESADO", avisos: [...e.avisos, "detenido antes de terminar"].join(" | ") });
+          r.guardadoHoja = e.hojaOk ? "SI" : "NO";
+          r.drive = e.driveOk ? "OK" : "NO";
+        }
+        return r;
+      });
+
+      const bien = resultados.filter((r) => /^(OK|CONSULTADO)/.test(r.estado)).length;
+      logAuto(`TERMINADO: ${bien}/${resultados.length} bien${consulta ? " (vista previa: no se guardó nada)" : ""}`, "head");
+      for (const r of resultados) {
+        if (!/^(OK|CONSULTADO)/.test(r.estado) || r.avisos || r.faltaActualizar) {
+          logAuto(`${r.estado} · ${[r.faltaActualizar, r.avisos].filter(Boolean).join(" · ")}`, /^(OK|CONSULTADO)/.test(r.estado) ? "warn" : "err", r.dni);
+        }
+      }
+      if (dnis.length > 1 && !consulta) {
+        const h = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        const marca = `${p(h.getDate())}.${p(h.getMonth() + 1)}.${h.getFullYear()} ${p(h.getHours())}.${p(h.getMinutes())}.${p(h.getSeconds())}`;
+        const nombre = `DETALLE RRCC ${marca}.xlsx`;
+        let detalle = null;
+        try {
+          detalle = await armarXlsx([hojaDetalleAuto(resultados)]);
+          if (destino) await guardarAuto(destino, nombre, detalle);
+          logAuto(`Excel de detalle: ${nombre}`, "ok");
+        } catch (x) {
+          logAuto(`no se pudo guardar el Excel de detalle: ${x.message}`, "err");
+        }
+        // un solo ZIP con el ZIP de cada DNI (y el Excel de detalle), en el orden de la lista
+        if (zips?.size) {
+          try {
+            const general = new JSZip();
+            for (const d of dnis) {
+              const z = zips.get(d);
+              if (z) general.file(z.nombre, z.blob);
+            }
+            if (detalle) general.file(nombre, detalle);
+            const nombreGeneral = `RRCC ${marca} (${zips.size} DNI).zip`;
+            descargarBlob(await general.generateAsync({ type: "blob", compression: "STORE" }), nombreGeneral);
+            const sinZip = dnis.filter((d) => !zips.has(d));
+            logAuto(`ZIP general descargado: ${nombreGeneral}${sinZip.length ? ` · sin ZIP: ${sinZip.join(", ")}` : ""}`, sinZip.length ? "warn" : "ok");
+          } catch (x) {
+            logAuto(`no se pudo armar el ZIP general: ${x.message}`, "err");
+          }
+        } else if (detalle && !destino) {
+          descargarBlob(detalle, nombre);
+        }
+      }
+      notificar(
+        consulta ? "Vista previa automática completa" : "Renovación automática completa",
+        `${bien}/${resultados.length} bien${resultados.length - bien ? ` · ${resultados.length - bien} con observación o falla (ver consola)` : ""}`,
+        bien === resultados.length ? "ok" : "warn"
+      );
+    } finally {
+      auto.activo = false;
+      auto.detener = false;
+      el.auto.classList.remove("rn-auto-activo");
+      el.auto.querySelector(".go-txt").textContent = "RENOVAR AUTOMÁTICO";
+      el.auto.disabled = false;
+      el.autoPrevia.disabled = false;
+      window.removeEventListener("beforeunload", avisarSalida);
+      candado?.release().catch(() => {});
+    }
+  }
+
+  el.auto?.addEventListener("click", async () => {
+    if (auto.activo) {
+      auto.detener = true;
+      el.auto.disabled = true;
+      el.auto.querySelector(".go-txt").textContent = "DETENIENDO…";
+      logAuto("DETENER: no se empiezan más DNI; se cierran los que están en marcha", "warn");
+      if (corriendo) abortador?.abort();
+      return;
+    }
+    if (corriendo) {
+      notificar("Hay una renovación en curso", "Espera a que termine o abórtala antes de empezar la automática.", "warn");
+      return;
+    }
+    const dnis = objetivos().map((o) => o.dni);
+    if (!dnis.length) {
+      consola("escribe al menos un documento", "warn");
+      el.dnis.focus();
+      return;
+    }
+    const consulta = Boolean(el.autoPrevia?.checked);
+    let destino = null;
+    if (!consulta) {
+      try {
+        destino = await carpetaDelDia();
+      } catch (e) {
+        if (e?.name !== "AbortError") notificar("No se pudo usar la carpeta", e.message, "warn");
+        return; // sin carpeta no se empieza: los ZIP no tendrian donde ir
+      }
+    }
+    pedirPermisoAviso();
+    await renovarAutomatico(dnis, { consulta, destino });
+  });
+
+  el.autoCarpeta?.addEventListener("click", async (ev) => {
+    if (!ev.target.closest("[data-auto-cambiar]") || auto.activo) return;
+    try {
+      await carpetaDelDia({ cambiar: true });
+    } catch (e) {
+      if (e?.name !== "AbortError") notificar("No se pudo usar la carpeta", e.message, "warn");
+    }
+  });
+  if (puedeElegirCarpeta) carpetaRecordada().then(pintarCarpetaAuto);
+  else pintarCarpetaAuto(null);
+
   el.run.addEventListener("click", () => {
-    if (corriendo) return;
+    if (corriendo || auto.activo) return;
     pedirPermisoAviso();
     ejecutar({ soloConsulta: false });
   });
@@ -2595,7 +3504,7 @@ export function montarRenovacion() {
   // Enter en el cuadro de documentos = consultar: es lo que se hace mas
   // veces y no toca nada, asi que no hay riesgo de dispararlo sin querer.
   el.dnis.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !corriendo) {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !corriendo && !auto.activo) {
       ev.preventDefault();
       ejecutar({ soloConsulta: true });
     }
@@ -2604,6 +3513,7 @@ export function montarRenovacion() {
   el.stop.addEventListener("click", () => {
     abortador?.abort();
     consola("abortando...", "warn");
+    if (auto.activo && !auto.detener) el.auto.click(); // ABORTAR tambien detiene la automatica
   });
 
   refrescar();

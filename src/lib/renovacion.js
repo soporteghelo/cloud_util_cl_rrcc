@@ -16,7 +16,18 @@
 
 import { buscar, descargar, sheets, drive, driveDirecto, aBase64, desdeBase64, blobABase64 } from "./api.js";
 import { obtenerContexto, obtenerPersonal, obtenerPersona, anotarPersona } from "./datos.js";
-import { renovarFila, copiarFila, leerFila, filaNueva, tiposDeMatriz, diferenciasFila, normalizarDocumento } from "../../shared/estados.js";
+import {
+  renovarFila,
+  copiarFila,
+  leerFila,
+  filaNueva,
+  tiposDeMatriz,
+  diferenciasFila,
+  normalizarDocumento,
+  SIEMPRE_A,
+  construirDiccionario,
+  mapearCurso,
+} from "../../shared/estados.js";
 import { CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { fotocheckImagen, nombreFotocheck } from "./fotocheck.js";
 import { armarAutorizacion, medidasWord, medirImagen } from "./docx.js";
@@ -1110,4 +1121,538 @@ export async function subirFoto(archivo, { nombre, senal } = {}) {
     senal
   );
   return r.id;
+}
+
+/* ------------------------------------------------------------------ */
+/* RENOVAR AUTOMATICO: los criterios del lote                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Lo que antes hacia el robot de AUTO_RRCC (renovar_rrcc.py) desde afuera,
+ * ahora dentro de la pestana. Aca va solo la parte que decide (sin red ni
+ * DOM, para poder probarla); quien la ejecuta sobre las fichas es
+ * `vistas/renovacion.js`. Las fechas viajan como texto ISO "aaaa-mm-dd".
+ */
+
+/** Interruptores de cada criterio (los de criterios.json del robot). */
+export const CRITERIOS_AUTO = Object.freeze({
+  // HM y ES: del certificado mas reciente y VIGENTE entre RIESGOS CRITICOS
+  // (panel EIN) y CERTIFICADOS INDUCCION, la fecha de su curso en la tabla del
+  // PDF + 365 dias
+  actualizarHmEs: true,
+  rrccConFechaDeInduccion: ["HM", "ES"],
+  // HM y ES van siempre como "A": un "C" se cambia a "A"
+  hmEsSiempreA: true,
+  // estos "C" siguen en "C" y llevan la misma vigencia que HM y ES (en "A"
+  // siguen en "A" con la vigencia de su certificado)
+  cIgualQueHmEs: true,
+  cConFechaDeHmEs: ["CS", "AE", "EC", "SP", "SQ", "TA"],
+  // los demas "C" pasan a "–" (sin tipo ni fecha): entre ellos IE, PM, OC,
+  // VEM y AP
+  demasCSinTipo: true,
+  // demas "A": la vigencia del certificado de la tarjeta, si es de estos origenes
+  aSegunCertificado: true,
+  origenesCertificadoA: ["JOMISER", "DRIVE"],
+  // "x" a los certificados de HM y ES
+  xEnHmEs: true,
+  // de los paneles laterales solo queda uno: el elegido (o el mas reciente)
+  soloUnCertificadoLateral: true,
+  // EMO vencido o VEM "A" vencido -> el ZIP dice FALTA ACTUALIZAR
+  marcarFaltaActualizar: true,
+});
+
+/** Tiempos y reintentos de la corrida automatica (segundos). */
+export const EJECUCION_AUTO = Object.freeze({
+  carpetaZip: "{fecha}_RRCC",
+  vueltas: 4, // cada vuelta nueva lleva solo los DNI que no se pudieron cerrar
+  reintentosPaso: 3,
+  reintentarSiFaltaCertificado: true,
+  esperaEntreVueltasSeg: 10,
+  esperaBaseOkSeg: 120,
+  esperaEntreGuardadosSeg: 45,
+  esperaFotoSeg: 120,
+  esperaZipSeg: 180,
+  esperaDriveSeg: 600,
+  sinAvanceSeg: 420,
+});
+
+/** UMBRAL_VENCIDO de la app: la vigencia es el curso + 365 dias. */
+export const DIAS_VIGENCIA_AUTO = 365;
+
+const MESES_AUTO = {
+  ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6, JULIO: 7,
+  AGOSTO: 8, SETIEMBRE: 9, SEPTIEMBRE: 9, OCTUBRE: 10, NOVIEMBRE: 11, DICIEMBRE: 12,
+};
+
+export const sinTildesAuto = (texto) =>
+  String(texto ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+
+function isoValida(anio, mes, dia) {
+  const f = new Date(Date.UTC(anio, mes - 1, dia));
+  if (f.getUTCFullYear() !== anio || f.getUTCMonth() !== mes - 1 || f.getUTCDate() !== dia) return null;
+  return f.toISOString().slice(0, 10);
+}
+
+/** "12/11/2025" (o "1/9/2026") -> "2025-11-12". null si no es una fecha. */
+export function isoDeCorta(texto) {
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(texto || "");
+  return m ? isoValida(Number(m[3]), Number(m[2]), Number(m[1])) : null;
+}
+
+/** "2025-11-12" -> el mismo texto si es una fecha valida, null si no. */
+export function isoValidaAuto(texto) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(texto || "").trim());
+  return m ? isoValida(Number(m[1]), Number(m[2]), Number(m[3])) : null;
+}
+
+/** "2025-11-12" -> "12/11/2025" (o "sin fecha"). */
+export const cortaDeIso = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "sin fecha");
+
+const diaDe = (iso) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10))) / 86400000;
+export const sumarDiasIso = (iso, dias) => new Date((diaDe(iso) + dias) * 86400000).toISOString().slice(0, 10);
+
+/** Hoy en la hora local, como ISO. */
+export function hoyLocalIso(ahora = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${ahora.getFullYear()}-${p(ahora.getMonth() + 1)}-${p(ahora.getDate())}`;
+}
+
+/** Como estadoDe() de la app: VENCIDO si pasaron mas de 365 dias desde el curso. */
+export function cursoVigente(fechaCurso, hoy) {
+  if (!fechaCurso) return false;
+  const dias = diaDe(hoy) - diaDe(fechaCurso);
+  return dias >= 0 && dias <= DIAS_VIGENCIA_AUTO;
+}
+
+/**
+ * Fecha de un certificado de induccion a partir del texto del PDF:
+ * "INICIO: 23/9/2026" o "Realizado el dia 23 de Setiembre del 2026".
+ * Devuelve { fecha, problema }.
+ */
+export function fechaDeInduccion(texto, dni) {
+  const plano = sinTildesAuto(texto).replace(/\s+/g, " ");
+  if (!plano.replace(/\D/g, "").includes(String(dni).replace(/^0+/, ""))) return { fecha: null, problema: "el PDF no trae este DNI" };
+  // "INICIO: 23/9/2026" o, en los certificados por curso, "INICIO: 7 / 10 / 2026"
+  const fechas = [...plano.matchAll(/INICIO\s*:\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/g)].map((m) =>
+    isoValida(Number(m[3]), Number(m[2]), Number(m[1]))
+  );
+  if (!fechas.length) {
+    for (const m of plano.matchAll(/REALIZADO EL DIA (\d{1,2}) DE ([A-Z]+) DEL? (\d{4})/g)) {
+      if (MESES_AUTO[m[2]]) fechas.push(isoValida(Number(m[3]), MESES_AUTO[m[2]], Number(m[1])));
+    }
+  }
+  const validas = fechas.filter(Boolean).sort();
+  if (!validas.length) return { fecha: null, problema: "no se encontró la fecha en el PDF" };
+  return { fecha: validas[validas.length - 1], problema: "" };
+}
+
+/**
+ * Fecha de cada curso segun el contenido del certificado (EIN o induccion de
+ * Drive), que es la fecha real del curso y no la de INICIO. Lee los dos
+ * formatos que hay:
+ *
+ * - Tabla "CURSO RIESGOS CRITICOS": la columna FECHA usa celdas combinadas,
+ *   una fecha para varios cursos seguidos, centrada en su bloque ("1.- a 7.-"
+ *   el primer dia, "8.- a 13.-" el segundo).
+ * - Un certificado por curso en el mismo PDF ("...el curso de: TRABAJOS EN
+ *   ALTURA Realizado el dia 7 de octubre del 2026"), cada uno seguido de la
+ *   pagina de su TEMARIO.
+ *
+ * `paginas` = [{ items: [{ str, x, y, ancho }] }] con las coordenadas de pdf.js
+ * (y crece hacia arriba). Devuelve { ES: "2025-10-09", AE: "2025-10-08", ... };
+ * vacio si el PDF no trae ninguno de los dos.
+ */
+export function fechasDeCursosPdf(paginas, dic = construirDiccionario([])) {
+  const lista = paginas || [];
+  const fechas = fechasPorCertificado(lista, dic);
+  // la tabla es mas precisa: si un curso sale en los dos, manda la tabla
+  for (const pagina of lista) Object.assign(fechas, fechasDePagina(pagina.items || [], dic));
+  return fechas;
+}
+
+const textoPlano = (pagina) =>
+  sinTildesAuto((pagina?.items || []).map((i) => i.str).join(" ")).replace(/\s+/g, " ").trim();
+
+/** Codigo RRCC del primer nombre que se pueda mapear (null si ninguno). */
+function primerCodigo(nombres, dic) {
+  for (const nombre of nombres) {
+    const codigo = nombre ? mapearCurso(nombre, dic) : null;
+    if (codigo && codigo !== "IGNORADO") return codigo;
+  }
+  return null;
+}
+
+/** "Realizado el dia 7 de octubre del 2026" o "INICIO: 7 / 10 / 2026" (con o sin espacios). */
+function fechaDeTexto(plano) {
+  const r = /REALIZADO EL DIA (\d{1,2}) DE ([A-Z]+),? DEL? (\d{4})/.exec(plano);
+  if (r && MESES_AUTO[r[2]]) {
+    const iso = isoValida(Number(r[3]), MESES_AUTO[r[2]], Number(r[1]));
+    if (iso) return iso;
+  }
+  const i = /INICIO\s*:\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/.exec(plano);
+  return i ? isoValida(Number(i[3]), Number(i[2]), Number(i[1])) : null;
+}
+
+/**
+ * PDF con un certificado por curso: cada pagina "culmino satisfactoriamente el
+ * curso de: X" da la fecha de X. El nombre a veces sale mal escrito
+ * ("EXCAVACACIONES") o fuera de lugar en el texto: entonces vale el titulo del
+ * TEMARIO o la fila CURSO / DURACION / NOTA de la pagina siguiente.
+ */
+function fechasPorCertificado(paginas, dic) {
+  const fechas = {};
+  const planos = paginas.map(textoPlano);
+  planos.forEach((plano, k) => {
+    if (!/CULMINADO SATISFACTORIAMENTE EL CURSO DE/.test(plano)) return;
+    const fecha = fechaDeTexto(plano);
+    if (!fecha) return;
+    const siguiente = planos[k + 1] || "";
+    const codigo = primerCodigo(
+      [
+        (/EL CURSO DE\s*:?\s*(.*?)\s*REALIZADO/.exec(plano) || [])[1],
+        /CULMINADO SATISFACTORIAMENTE/.test(siguiente) ? "" : (/TEMARIO\s+(.*?)\s*•/.exec(siguiente) || [])[1],
+        /CULMINADO SATISFACTORIAMENTE/.test(siguiente) ? "" : (/CURSO DURACION NOTA\s+(.*?)\s+\d/.exec(siguiente) || [])[1],
+      ],
+      dic
+    );
+    if (codigo && (!fechas[codigo] || fecha > fechas[codigo])) fechas[codigo] = fecha;
+  });
+  return fechas;
+}
+
+function fechasDePagina(items, dic) {
+  const limpios = items.filter((i) => String(i.str || "").trim());
+  const cabecera = limpios.find((i) => /^FECHA$/i.test(i.str.trim()));
+  if (!cabecera) return {};
+  const centro = (i) => i.x + (i.ancho || 0) / 2;
+  const colFecha = centro(cabecera);
+
+  // las fechas de la columna FECHA, de arriba hacia abajo
+  const dias = limpios
+    .filter((i) => i.y < cabecera.y && Math.abs(centro(i) - colFecha) < 60 && isoDeCorta(i.str.trim()) && /^\s*\d{1,2}\/\d{1,2}\/\d{4}\s*$/.test(i.str))
+    .map((i) => ({ y: i.y, iso: isoDeCorta(i.str) }))
+    .sort((a, b) => b.y - a.y);
+  if (!dias.length) return {};
+
+  // renglones a la izquierda de FECHA, armados con sus pedazos (pdf.js parte
+  // las tildes en items sueltos)
+  const porLinea = new Map();
+  for (const i of limpios) {
+    if (i.y >= cabecera.y || i.x >= cabecera.x - 5) continue;
+    const clave = [...porLinea.keys()].find((y) => Math.abs(y - i.y) <= 2) ?? i.y;
+    if (!porLinea.has(clave)) porLinea.set(clave, []);
+    porLinea.get(clave).push(i);
+  }
+  const lineas = [...porLinea]
+    .map(([y, trozos]) => {
+      trozos.sort((a, b) => a.x - b.x);
+      let texto = "";
+      trozos.forEach((t, k) => {
+        const previo = trozos[k - 1];
+        if (previo && t.x - (previo.x + (previo.ancho || 0)) > 1.5) texto += " ";
+        texto += t.str;
+      });
+      return { y, texto: texto.trim() };
+    })
+    .sort((a, b) => b.y - a.y);
+
+  // cada curso "N.- NOMBRE"; un renglon sin numero justo debajo es su continuacion
+  const filas = [];
+  for (const l of lineas) {
+    if (/^\d{1,2}\s*\.?\s*-/.test(l.texto)) filas.push({ arriba: l.y, abajo: l.y, texto: l.texto });
+    else {
+      const ultima = filas[filas.length - 1];
+      if (ultima && ultima.abajo - l.y <= 15) {
+        ultima.abajo = l.y;
+        ultima.texto += " " + l.texto;
+      }
+    }
+  }
+  if (filas.length < dias.length) return {};
+
+  // cursos seguidos -> bloques, uno por fecha, con cada fecha lo mas centrada
+  // posible en su bloque (asi se lee una celda combinada)
+  const n = filas.length;
+  const m = dias.length;
+  const costo = (g, a, b) => Math.abs((filas[a].arriba + filas[b].abajo) / 2 - dias[g].y);
+  const mejor = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(Infinity));
+  const corte = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(-1));
+  mejor[0][0] = 0;
+  for (let g = 1; g <= m; g++) {
+    for (let fin = g; fin <= n; fin++) {
+      for (let ini = g - 1; ini < fin; ini++) {
+        const c = mejor[g - 1][ini] + costo(g - 1, ini, fin - 1);
+        if (c < mejor[g][fin]) {
+          mejor[g][fin] = c;
+          corte[g][fin] = ini;
+        }
+      }
+    }
+  }
+
+  const fechas = {};
+  for (let g = m, fin = n; g > 0; g--) {
+    const ini = corte[g][fin];
+    for (let k = ini; k < fin; k++) {
+      const codigo = mapearCurso(filas[k].texto.replace(/^\d{1,2}\s*\.?\s*-\s*/, ""), dic);
+      if (codigo && codigo !== "IGNORADO" && !fechas[codigo]) fechas[codigo] = dias[g - 1].iso;
+    }
+    fin = ini;
+  }
+  return fechas;
+}
+
+/*
+ * `ficha` es lo que muestra la tarjeta (ver `leerFichaAuto` en la vista):
+ *   riesgos:   [{ codigo, tipo, venc, sinCert, certVigencia, certCurso, certClave, certExcluido }]
+ *   laterales: [{ origen: "EIN"|"INDUCCION", clave, curso, fecha, descargable, excluido }]
+ *   emo, nombre
+ */
+
+/**
+ * Candidatos a certificado de HM/ES: RIESGOS CRITICOS del panel EIN (con su
+ * fecha) y cada induccion descargable (su fecha se lee del PDF). De todos se
+ * lee el PDF (`leerPdf: true`) para sacar la fecha de cada curso de su tabla
+ * (`fechas`, ver `fechasDeCursosPdf`). El item "INDUCCION" de EIN no cuenta.
+ */
+export function candidatosLaterales(ficha) {
+  const lista = [];
+  for (const item of ficha.laterales || []) {
+    if (item.origen === "EIN" && sinTildesAuto(item.curso).includes("RIESGOS CRITICOS")) {
+      lista.push({ ...item, fechaIso: isoDeCorta(item.fecha), leerPdf: item.descargable !== false });
+    } else if (item.origen === "INDUCCION" && item.descargable) {
+      lista.push({ ...item, fechaIso: null, leerPdf: true });
+    }
+  }
+  return lista;
+}
+
+/** El que manda: el mas reciente entre los vigentes (null si ninguno lo esta). */
+export function elegirCertificadoLateral(candidatos, hoy) {
+  const vigentes = candidatos.filter((c) => cursoVigente(c.fechaIso, hoy));
+  vigentes.sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
+  return vigentes[0] || null;
+}
+
+/**
+ * Las fechas y tipos que hay que poner en la ficha. Devuelve
+ *   acciones:  [{ codigo, venc }] o [{ codigo, tipo }] ("A", o "" = pasar a "–")
+ *   esperadas: { codigo: iso | null } lo que la hoja tiene que terminar teniendo
+ *   cambios / avisos: textos para la consola y el Excel de detalle
+ */
+export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
+  const acciones = [];
+  const esperadas = {};
+  const cambios = [];
+  const avisos = [];
+  // copias: el plan cambia el tipo de HM/ES sin tocar la ficha recibida
+  const riesgos = new Map((ficha.riesgos || []).map((r) => [r.codigo, { ...r }]));
+  const codigosInd = criterios.rrccConFechaDeInduccion.map((c) => c.toUpperCase());
+  const codigosC = criterios.cConFechaDeHmEs.map((c) => c.toUpperCase());
+  const poner = (codigo, r, venc, porque) => {
+    if (isoValidaAuto(r.venc) === venc) return;
+    acciones.push({ codigo, venc });
+    esperadas[codigo] = venc;
+    cambios.push(`${codigo}: ${cortaDeIso(isoValidaAuto(r.venc))} -> ${cortaDeIso(venc)} (${porque})`);
+  };
+
+  if (!elegido) avisos.push(`sin RIESGOS CRITICOS (EIN) ni inducción vigente: ${codigosInd.join("/")} sin actualizar`);
+
+  // HM y ES nunca quedan en "C"
+  if (criterios.hmEsSiempreA) {
+    for (const codigo of SIEMPRE_A) {
+      const r = riesgos.get(codigo);
+      if (r?.tipo !== "C") continue;
+      acciones.push({ codigo, tipo: "A" });
+      r.tipo = "A";
+      cambios.push(`${codigo}: C -> A (siempre autorizado)`);
+    }
+  }
+
+  // La fecha de cada curso es la que dice la tabla del certificado elegido
+  // (`elegido.fechas`). Sin esa fila (o sin tabla) va la de HM/ES de la misma
+  // tabla y, a falta de tabla, la fecha general del certificado.
+  const tabla = (elegido && elegido.fechas) || {};
+  const fechaCurso = (codigo) => {
+    if (tabla[codigo]) return { iso: tabla[codigo], porque: `curso del ${cortaDeIso(tabla[codigo])} en ${elegido.origen}` };
+    const base = codigosInd.map((c) => tabla[c]).find(Boolean);
+    if (base) return { iso: base, porque: `sin fila propia: HM/ES del ${cortaDeIso(base)} en ${elegido.origen}` };
+    return { iso: elegido.fechaIso, porque: `${elegido.origen} ${cortaDeIso(elegido.fechaIso)}` };
+  };
+  if (elegido && !Object.keys(tabla).length) avisos.push(`el certificado ${elegido.origen} no trae la tabla de cursos: se usó su fecha general (${cortaDeIso(elegido.fechaIso)})`);
+
+  // HM y ES: fecha de su curso + 365
+  let nueva = null;
+  if (elegido && criterios.actualizarHmEs) {
+    for (const codigo of codigosInd) {
+      const f = fechaCurso(codigo);
+      const venc = sumarDiasIso(f.iso, DIAS_VIGENCIA_AUTO);
+      nueva ||= venc;
+      const r = riesgos.get(codigo);
+      if (r && (r.tipo === "A" || r.tipo === "C")) poner(codigo, r, venc, f.porque);
+    }
+  }
+
+  // "C" de la lista: del mismo certificado que HM y ES, con la fecha de su curso
+  if (criterios.cIgualQueHmEs) {
+    for (const codigo of codigosC) {
+      const r = riesgos.get(codigo);
+      if (!r || r.tipo !== "C") continue;
+      if (!nueva) avisos.push(`${codigo} (C): sin actualizar (no hay fecha de HM/ES)`);
+      else {
+        const f = fechaCurso(codigo);
+        poner(codigo, r, sumarDiasIso(f.iso, DIAS_VIGENCIA_AUTO), f.porque);
+      }
+    }
+  }
+
+  // los demas "C" pasan a "–" (la app tambien les borra la fecha)
+  if (criterios.demasCSinTipo) {
+    for (const [codigo, r] of riesgos) {
+      if (r.tipo !== "C" || codigosC.includes(codigo) || codigosInd.includes(codigo)) continue;
+      acciones.push({ codigo, tipo: "" });
+      esperadas[codigo] = null;
+      cambios.push(`${codigo}: C -> – (vigencia ${cortaDeIso(isoValidaAuto(r.venc))} borrada)`);
+    }
+  }
+
+  // demas "A": la vigencia del certificado que muestra la tarjeta
+  if (criterios.aSegunCertificado) {
+    const origenesOk = new Set(criterios.origenesCertificadoA.map((o) => o.toUpperCase()));
+    for (const [codigo, r] of riesgos) {
+      if (r.tipo !== "A" || codigosInd.includes(codigo)) continue;
+      if (r.sinCert) {
+        avisos.push(`${codigo} (A): sin certificado`);
+        continue;
+      }
+      const origen = String(r.certCurso || "").split("·").pop().trim().toUpperCase();
+      if (!origenesOk.has(origen)) {
+        avisos.push(`${codigo} (A): su certificado es de ${origen || "?"}: no se tocó`);
+        continue;
+      }
+      const vig = isoDeCorta(r.certVigencia);
+      if (vig) poner(codigo, r, vig, origen);
+    }
+  }
+  return { acciones, esperadas, cambios, avisos, nueva };
+}
+
+/**
+ * Las "x" a pulsar sobre la ficha ya editada: certificados de HM y ES fuera y,
+ * de los paneles laterales, solo queda el elegido (si ninguno esta vigente,
+ * el mas reciente). Un certificado puede estar en la tarjeta y en el panel
+ * (comparten la "x"): va una sola vez por clave. Devuelve [{ clave, texto, codigo? }]
+ * (`codigo` = la "x" de esa tarjeta; sin el, la del panel lateral).
+ */
+export function planQuitar(ficha, elegido, candidatos, criterios = CRITERIOS_AUTO) {
+  let claveElegido = elegido?.clave || null;
+  if (!elegido && criterios.soloUnCertificadoLateral) {
+    const conFecha = candidatos.filter((c) => c.fechaIso).sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
+    if (conFecha.length) claveElegido = conFecha[0].clave;
+  }
+  const quitar = new Map();
+  if (criterios.xEnHmEs) {
+    for (const codigo of criterios.rrccConFechaDeInduccion.map((c) => c.toUpperCase())) {
+      const r = (ficha.riesgos || []).find((x) => x.codigo === codigo);
+      // la "x" de la tarjeta solo existe en un "A"
+      if (r?.certClave && r.tipo === "A" && !r.certExcluido && r.certClave !== claveElegido && !quitar.has(r.certClave)) {
+        quitar.set(r.certClave, { clave: r.certClave, codigo, texto: `${codigo}: certificado quitado del ZIP (x)` });
+      }
+    }
+  }
+  if (criterios.soloUnCertificadoLateral) {
+    for (const item of ficha.laterales || []) {
+      if (item.excluido || !item.clave || item.clave === claveElegido || quitar.has(item.clave)) continue;
+      quitar.set(item.clave, { clave: item.clave, texto: `panel ${item.origen}: ${item.curso} ${item.fecha} quitado del ZIP (x)` });
+    }
+  }
+  return [...quitar.values()];
+}
+
+/** EMO vencido (o sin fecha) o VEM "A" vencido: lo que hace que el ZIP diga FALTA ACTUALIZAR. Vence hoy = aun vale. */
+export function faltaActualizar(ficha, hoy) {
+  const faltan = [];
+  const emo = isoValidaAuto(ficha.emo);
+  if (!emo) faltan.push("EMO: sin fecha de vencimiento");
+  else if (emo < hoy) faltan.push(`EMO: vencido el ${cortaDeIso(emo)}`);
+  const vem = (ficha.riesgos || []).find((x) => x.codigo === "VEM");
+  if (vem?.tipo === "A") {
+    const v = isoValidaAuto(vem.venc);
+    if (!v) faltan.push("Vehiculos y Equipos Moviles (A): sin vigencia");
+    else if (v < hoy) faltan.push(`Vehiculos y Equipos Moviles (A): vencido el ${cortaDeIso(v)}`);
+  }
+  return faltan;
+}
+
+/** Texto de "FALTA ACTUALIZAR.txt", el que va dentro del ZIP junto al Word. */
+export function textoFaltaActualizar(dni, faltan, ahora = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  const cuando = `${p(ahora.getDate())}/${p(ahora.getMonth() + 1)}/${ahora.getFullYear()} ${p(ahora.getHours())}:${p(ahora.getMinutes())}`;
+  return `FALTA ACTUALIZAR - DNI ${dni}\r\nRevisado el ${cuando}\r\n\r\n` + faltan.map((f) => `- ${f}\r\n`).join("");
+}
+
+/** <DNI>_<NOMBRE>[ - FALTA ACTUALIZAR].zip a partir del nombre que propone la app. */
+export function nombreZipAuto(sugerido, dni, faltan = []) {
+  let base = String(sugerido || dni).replace(/\.zip$/i, "").trim() || dni;
+  if (!base.startsWith(dni)) base = `${dni}_${base}`;
+  return { base, nombre: `${base}${faltan.length ? " - FALTA ACTUALIZAR" : ""}.zip` };
+}
+
+/**
+ * Errores de certificados de la consola, repartidos por DNI. En un lote la
+ * etapa 1 escribe bajo una cabecera "[i/n] DNI x" y la etapa 2 antepone "[x]".
+ * Solo cuentan los certificados que no bajaron / no subieron.
+ * `lineas` = [{ t: texto, c: clases }].
+ */
+export function erroresPorDni(lineas) {
+  const errores = {};
+  let actual = null;
+  for (const l of lineas) {
+    const t = String(l.t || "").trim();
+    let m = /^(?:\[\d+\/\d+\] )?DNI (\d{6,12})/.exec(t);
+    if (m) {
+      actual = m[1];
+      continue;
+    }
+    m = /^\[(\d{6,12})\]\s*(.*)$/.exec(t);
+    const [dni, texto] = m ? [m[1], m[2]] : [actual, t];
+    if (/\bln-err\b/.test(l.c) && dni && (texto.startsWith("·") || texto.includes("no se pudo bajar") || texto.includes("no se pudo subir"))) {
+      (errores[dni] ||= []).push(texto);
+    }
+  }
+  return errores;
+}
+
+/** OK | OBSERVACION | FALLA | NO PROCESADO, para el Excel de detalle. */
+export function calificarAuto(r) {
+  if (r.estado === "ERROR") return "FALLA";
+  if (r.estado === "NO PROCESADO") return "NO PROCESADO";
+  if ((r.estado === "OK" || r.estado === "CONSULTADO") && !r.faltaActualizar && !r.avisos) return "OK";
+  return "OBSERVACION";
+}
+
+/** La hoja del Excel de detalle (para `armarXlsx`): una fila por DNI. */
+export function hojaDetalleAuto(resultados) {
+  const lineas = (texto) => String(texto || "").split(" | ").map((t) => t.trim()).filter(Boolean).join("\n");
+  const columnas = [
+    { titulo: "N°", ancho: 5, tipo: "numero" },
+    { titulo: "DNI", ancho: 11 },
+    { titulo: "APELLIDOS Y NOMBRES", ancho: 32 },
+    { titulo: "RESULTADO", ancho: 15 },
+    { titulo: "FALLA / OBSERVACION", ancho: 55 },
+    { titulo: "FALTA ACTUALIZAR", ancho: 38 },
+    { titulo: "CAMBIOS HECHOS", ancho: 55 },
+    { titulo: "ARCHIVO ZIP", ancho: 45 },
+    { titulo: "HOJA BD", ancho: 9 },
+    { titulo: "DRIVE", ancho: 8 },
+    { titulo: "INTENTOS", ancho: 9, tipo: "numero" },
+  ];
+  const filas = resultados.map((r, i) => {
+    const calif = calificarAuto(r);
+    let detalle = lineas(r.avisos);
+    if (!["OK", "OK CON AVISOS", "ERROR", "NO PROCESADO", "CONSULTADO"].includes(r.estado)) detalle = [r.estado, detalle].filter(Boolean).join("\n");
+    if (calif === "FALLA" && !r.zip) detalle = ["NO SE GENERÓ EL ZIP", detalle].filter(Boolean).join("\n");
+    return [i + 1, r.dni, r.nombre, calif, detalle, lineas(r.faltaActualizar), lineas(r.cambios), r.zip, r.guardadoHoja, r.drive, r.intentos];
+  });
+  return { nombre: "DETALLE", columnas, filas };
 }

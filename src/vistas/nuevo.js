@@ -14,7 +14,7 @@ import { normalizarDni } from "../lib/dni.js";
 import { aFormatoCorto } from "../../shared/estados.js";
 import { obtenerContexto, obtenerPersona } from "../lib/datos.js";
 import { altaPersona, generarSalidas, subirFoto } from "../lib/renovacion.js";
-import { tiposDeMatriz, cargoMasParecido, cargosDeMatriz } from "../../shared/estados.js";
+import { tiposDeMatriz, cargoMasParecido, cargosDeMatriz, tipoObligado, SIEMPRE_A } from "../../shared/estados.js";
 import { RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
 
@@ -59,7 +59,8 @@ export function montarNuevo() {
 
   function pintarMatriz(tipos = {}) {
     const tarjetas = RRCC.map((r, orden) => {
-      const v = grupoDeTipo(tipos[r.codigo] || "");
+      // ES y HM son siempre "A": la matriz no les puede poner "C"
+      const v = grupoDeTipo(tipoObligado(r.codigo, tipos[r.codigo]));
       return {
         grupo: v,
         html:
@@ -68,7 +69,7 @@ export function montarNuevo() {
           `<select data-tipo="${r.codigo}">` +
           `<option value=""${v === "" ? " selected" : ""}>—</option>` +
           `<option value="A"${v === "A" ? " selected" : ""}>A</option>` +
-          `<option value="C"${v === "C" ? " selected" : ""}>C</option>` +
+          (SIEMPRE_A.includes(r.codigo) ? "" : `<option value="C"${v === "C" ? " selected" : ""}>C</option>`) +
           `</select></label>`,
       };
     });

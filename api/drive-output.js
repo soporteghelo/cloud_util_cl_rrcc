@@ -45,6 +45,13 @@ import { driveFotoBuscar, driveBajarPublico } from "./_lib/drive.js";
 /** Tope defensivo: Vercel corta el cuerpo en 4.5 MB de todos modos. */
 const MAX_BYTES = 4 * 1024 * 1024;
 
+/**
+ * El id de FOTOS segun Apps Script, para la lectura publica de fotos cuando el
+ * servidor no tiene DRIVE_FOTOS_FOLDER_ID ni DRIVE_RRCC_FOLDER_ID (asi estaba
+ * Vercel: todas las fotos de VER RRCC salian "SIN FOTO"). Se pide una vez.
+ */
+const fotosSegunAppsScript = async () => (await pedirAppsScript("drive", { accion: "carpetas" }))?.fotos || null;
+
 function limpiarNombre(texto, max = 120) {
   return (
     String(texto ?? "")
@@ -209,7 +216,7 @@ export default async function handler(req, res) {
       // La lectura de FOTOS es publica y se resuelve directo por nombre. Asi
       // evitamos que Apps Script recorra toda la carpeta y agote su tiempo.
       if (accion === "foto-de") {
-        const archivo = await driveFotoBuscar(body.dni);
+        const archivo = await driveFotoBuscar(body.dni, { carpetaRespaldo: fotosSegunAppsScript });
         if (archivo) {
           res.status(200).json({
             ok: true,

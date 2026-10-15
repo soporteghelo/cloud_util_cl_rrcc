@@ -215,6 +215,19 @@
                 <span>Escribir los cambios en la hoja <code>BD AESA</code></span>
               </label>
 
+              <!-- RENOVAR AUTOMATICO: la misma renovacion, con los criterios aplicados solos a cada ficha (ver vistas/renovacion.js) -->
+              <div class="rn-auto">
+                <button class="btn btn-auto" id="rn-auto" type="button" title="Renueva la lista y hace sola el resto: HM y ES con el certificado vigente más reciente (RIESGOS CRÍTICOS de EIN o inducción) + 1 año, los C, cada A con la vigencia de su certificado, las x, GUARDAR CAMBIOS verificado en la hoja y el ZIP de cada persona en la carpeta del día (FALTA ACTUALIZAR si el EMO o VEM vencieron)">
+                  <span class="go-txt">RENOVAR AUTOMÁTICO</span>
+                  <span class="go-arrow">▸</span>
+                </button>
+                <label class="check rn-auto-check">
+                  <input type="checkbox" id="rn-auto-previa" />
+                  <span>Solo vista previa (no guarda nada)</span>
+                </label>
+                <div class="rn-auto-carpeta" id="rn-auto-carpeta"></div>
+              </div>
+
               <button class="btn btn-go" id="rn-run" type="button">
                 <span class="go-txt">RENOVAR AUTORIZACIONES</span>
                 <span class="go-arrow">▸</span>

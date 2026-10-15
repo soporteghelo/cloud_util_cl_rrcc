@@ -39,6 +39,9 @@ const PUERTO = Number(process.env.PORT || 3000);
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  // el worker de PDF.js se carga como modulo: con octet-stream el navegador lo
+  // rechaza ("Setting up fake worker failed") y no se lee ningun PDF
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".json": "application/json; charset=utf-8",
