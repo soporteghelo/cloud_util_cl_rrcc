@@ -152,14 +152,19 @@ test("planFechas: HM/ES y los C de la lista con la fecha del elegido; demas C a 
   assert.ok(!planFechas(f, elegido).acciones.some((a) => a.codigo === "EC"));
 });
 
-test("planFechas: A sin certificado pasa a –, salvo HM y ES", () => {
+test("planFechas: A sin certificado pasa a –, salvo HM, ES y VEM", () => {
   const f = ficha();
   f.riesgos.find((r) => r.codigo === "HM").sinCert = true;
   f.riesgos.find((r) => r.codigo === "ES").sinCert = true;
+  f.riesgos.find((r) => r.codigo === "VEM").sinCert = true;
   f.riesgos.push(riesgo("CS2", "A", "2027-10-14", { sinCert: true }));
   const plan = planFechas(f, { origen: "EIN", clave: "EIN|rc1|", fechaIso: "2026-08-20" });
   assert.deepEqual(plan.acciones.find((a) => a.codigo === "CS2"), { codigo: "CS2", tipo: "" });
   assert.equal(plan.esperadas.CS2, null);
+  // VEM sigue en A (su vigencia cuenta en FALTA ACTUALIZAR): solo avisa
+  assert.ok(!plan.acciones.some((a) => a.codigo === "VEM"));
+  assert.ok(!("VEM" in plan.esperadas));
+  assert.ok(plan.avisos.some((a) => a.startsWith("VEM (A): sin certificado")));
   for (const codigo of ["HM", "ES"]) {
     assert.ok(!plan.acciones.some((a) => a.codigo === codigo && a.tipo === ""), `${codigo} no pasa a –`);
     assert.equal(plan.esperadas[codigo], "2027-08-20");

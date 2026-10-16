@@ -1153,8 +1153,10 @@ export const CRITERIOS_AUTO = Object.freeze({
   // demas "A": la vigencia del certificado de la tarjeta, si es de estos origenes
   aSegunCertificado: true,
   // un "A" sin certificado pasa a "–" (sin tipo ni fecha); HM y ES no, que
-  // llevan la fecha del certificado lateral
+  // llevan la fecha del certificado lateral, ni los de esta lista (VEM sigue
+  // en "A" para que su vigencia cuente en FALTA ACTUALIZAR)
   aSinCertificadoSinTipo: true,
+  aSinCertificadoSiguenA: ["VEM"],
   origenesCertificadoA: ["JOMISER", "DRIVE"],
   // "x" a los certificados de HM y ES
   xEnHmEs: true,
@@ -1546,10 +1548,11 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
   // demas "A": la vigencia del certificado que muestra la tarjeta
   if (criterios.aSegunCertificado) {
     const origenesOk = new Set(criterios.origenesCertificadoA.map((o) => o.toUpperCase()));
+    const siguenA = new Set((criterios.aSinCertificadoSiguenA || []).map((c) => c.toUpperCase()));
     for (const [codigo, r] of riesgos) {
       if (r.tipo !== "A" || codigosInd.includes(codigo)) continue;
       if (r.sinCert) {
-        if (criterios.aSinCertificadoSinTipo) {
+        if (criterios.aSinCertificadoSinTipo && !siguenA.has(codigo)) {
           acciones.push({ codigo, tipo: "" });
           esperadas[codigo] = null;
           cambios.push(`${codigo}: A -> – (sin certificado; vigencia ${cortaDeIso(isoValidaAuto(r.venc))} borrada)`);
