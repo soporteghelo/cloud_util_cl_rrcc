@@ -1152,6 +1152,9 @@ export const CRITERIOS_AUTO = Object.freeze({
   demasCSinTipo: true,
   // demas "A": la vigencia del certificado de la tarjeta, si es de estos origenes
   aSegunCertificado: true,
+  // un "A" sin certificado pasa a "–" (sin tipo ni fecha); HM y ES no, que
+  // llevan la fecha del certificado lateral
+  aSinCertificadoSinTipo: true,
   origenesCertificadoA: ["JOMISER", "DRIVE"],
   // "x" a los certificados de HM y ES
   xEnHmEs: true,
@@ -1419,7 +1422,9 @@ export function candidatosLaterales(ficha) {
   const lista = [];
   for (const item of ficha.laterales || []) {
     if (item.origen === "EIN" && sinTildesAuto(item.curso).includes("RIESGOS CRITICOS")) {
-      lista.push({ ...item, fechaIso: isoDeCorta(item.fecha), leerPdf: item.descargable !== false });
+      const descargable = item.descargable !== false;
+      // el que el panel ya muestra SIN CERTIFICADO no abre: no se elige
+      lista.push({ ...item, fechaIso: isoDeCorta(item.fecha), leerPdf: descargable, ...(descargable ? {} : { abre: false }) });
     } else if (item.origen === "INDUCCION" && item.descargable) {
       lista.push({ ...item, fechaIso: null, leerPdf: true });
     }
@@ -1427,11 +1432,33 @@ export function candidatosLaterales(ficha) {
   return lista;
 }
 
-/** El que manda: el mas reciente entre los vigentes (null si ninguno lo esta). */
+/**
+ * El que manda: el mas reciente entre los vigentes que abren (null si ninguno).
+ * `abre === false` = su PDF no se pudo bajar (EIN "sin certificado emitido" o
+ * un error que no se arreglo): no sirve para el ZIP y no se elige aunque su
+ * fecha sea la mas nueva.
+ */
 export function elegirCertificadoLateral(candidatos, hoy) {
-  const vigentes = candidatos.filter((c) => cursoVigente(c.fechaIso, hoy));
+  const vigentes = candidatos.filter((c) => c.abre !== false && cursoVigente(c.fechaIso, hoy));
   vigentes.sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
   return vigentes[0] || null;
+}
+
+/**
+ * Un candidato que no abrio por un error pasajero (`fallaPasajera`, no "sin
+ * certificado emitido") y que podria haber ganado: vigente y mas reciente que
+ * el elegido, o una induccion (su fecha solo sale del PDF). Con el, conviene
+ * otra vuelta antes que quedarse con un certificado mas viejo. null si no hay.
+ */
+export function candidatoPorReintentar(candidatos, elegido, hoy) {
+  return (
+    candidatos.find(
+      (c) =>
+        c.abre === false &&
+        c.fallaPasajera &&
+        (c.fechaIso ? cursoVigente(c.fechaIso, hoy) && (!elegido || c.fechaIso > elegido.fechaIso) : c.origen === "INDUCCION")
+    ) || null
+  );
 }
 
 /**
@@ -1522,7 +1549,11 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
     for (const [codigo, r] of riesgos) {
       if (r.tipo !== "A" || codigosInd.includes(codigo)) continue;
       if (r.sinCert) {
-        avisos.push(`${codigo} (A): sin certificado`);
+        if (criterios.aSinCertificadoSinTipo) {
+          acciones.push({ codigo, tipo: "" });
+          esperadas[codigo] = null;
+          cambios.push(`${codigo}: A -> – (sin certificado; vigencia ${cortaDeIso(isoValidaAuto(r.venc))} borrada)`);
+        } else avisos.push(`${codigo} (A): sin certificado`);
         continue;
       }
       const origen = String(r.certCurso || "").split("·").pop().trim().toUpperCase();
@@ -1547,7 +1578,7 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
 export function planQuitar(ficha, elegido, candidatos, criterios = CRITERIOS_AUTO) {
   let claveElegido = elegido?.clave || null;
   if (!elegido && criterios.soloUnCertificadoLateral) {
-    const conFecha = candidatos.filter((c) => c.fechaIso).sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
+    const conFecha = candidatos.filter((c) => c.fechaIso && c.abre !== false).sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
     if (conFecha.length) claveElegido = conFecha[0].clave;
   }
   const quitar = new Map();

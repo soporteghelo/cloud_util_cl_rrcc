@@ -18,6 +18,7 @@ import {
   EJECUCION_AUTO,
   candidatosLaterales,
   elegirCertificadoLateral,
+  candidatoPorReintentar,
   planFechas,
   planQuitar,
   faltaActualizar,
@@ -2921,13 +2922,19 @@ export function montarRenovacion() {
     for (let intento = 1; intento <= E.reintentosPaso; intento++) {
       try {
         const r = await descargarCertificado(cert);
-        if (r.sinCertificado) throw new Error(r.motivo || "sin certificado emitido");
+        if (r.sinCertificado) {
+          // EIN no tiene PDF para esa fila: reintentar no lo cambia
+          const sin = new Error(r.motivo || "sin certificado emitido");
+          sin.definitivo = true;
+          throw sin;
+        }
         const paginas = await paginasDePdf(r.pdf);
         return {
           texto: paginas.map((p) => p.items.map((it) => it.str).join(" ")).join("\n"),
           fechas: fechasDeCursosPdf(paginas, contexto?.diccionario),
         };
       } catch (e) {
+        if (e.definitivo) throw e;
         ultimo = e.message;
         logAuto(`no se pudo leer el PDF ${item.origen} ${item.curso} (${intento}): ${ultimo}`, "warn", dni);
         await dormir(3000 * intento);
@@ -2941,13 +2948,14 @@ export function montarRenovacion() {
    * sale con lo que se ve; el guardado se pulsa y se verifica aparte). En
    * vista previa solo informa lo que haria.
    */
-  async function aplicarCriteriosAuto(dni, consulta, hoy) {
+  async function aplicarCriteriosAuto(dni, consulta, hoy, ultimaVuelta = false) {
     const ficha = leerFichaAuto(dni);
     if (!ficha) throw new ReintentableAuto("no se pudo leer la ficha");
     const avisos = [];
 
     // el certificado lateral que manda: el mas reciente y vigente entre
-    // RIESGOS CRITICOS (EIN) y las inducciones de Drive
+    // RIESGOS CRITICOS (EIN) y las inducciones de Drive, y que ABRA (EIN lista
+    // filas "sin certificado emitido" que no se pueden poner en el ZIP)
     // y de cada uno, la fecha de cada curso segun la tabla de su PDF
     const candidatos = candidatosLaterales(ficha);
     for (const c of candidatos) {
@@ -2956,12 +2964,13 @@ export function montarRenovacion() {
       try {
         leido = await leerCertificadoAuto(dni, c);
       } catch (x) {
-        // la induccion no tiene otra fecha que la de su PDF: se reintenta en la
-        // vuelta siguiente. EIN conserva la fecha de su panel.
-        if (c.origen === "INDUCCION") throw new ReintentableAuto(`no se pudo leer el certificado de inducción: ${x.message}`);
-        avisos.push(`${c.origen} ${c.curso} ${c.fecha}: no se pudo leer el PDF (${x.message}): se usa la fecha del panel`);
+        // no sirve para el ZIP: se descarta y manda el siguiente que abra
+        c.abre = false;
+        c.fallaPasajera = !x.definitivo;
+        c.motivo = x.message;
         continue;
       }
+      c.abre = true;
       c.fechas = leido.fechas;
       if (c.origen === "INDUCCION") {
         const { fecha, problema } = fechaDeInduccion(leido.texto, dni);
@@ -2972,14 +2981,27 @@ export function montarRenovacion() {
     for (const c of candidatos) {
       const tabla = Object.entries(c.fechas || {});
       const deHmEs = ["ES", "HM"].map((k) => c.fechas?.[k] && `${k} ${cortaDeIso(c.fechas[k])}`).filter(Boolean).join(", ");
+      const noAbre = c.abre === false ? ` · NO ABRE (${c.motivo || "sin certificado"}): descartado` : "";
       logAuto(
         `candidato: ${c.origen} ${c.curso} ${cortaDeIso(c.fechaIso)}${cursoVigente(c.fechaIso, hoy) ? "" : " (NO vigente)"}` +
-          (tabla.length ? ` · tabla: ${tabla.length} cursos${deHmEs ? ` (${deHmEs})` : ""}` : c.leerPdf ? " · sin tabla de cursos" : ""),
-        "info",
+          (noAbre || (tabla.length ? ` · tabla: ${tabla.length} cursos${deHmEs ? ` (${deHmEs})` : ""}` : c.leerPdf ? " · sin tabla de cursos" : "")),
+        noAbre ? "warn" : "info",
         dni
       );
     }
     const elegido = elegirCertificadoLateral(candidatos, hoy);
+
+    // uno mas nuevo fallo por un error pasajero (EIN intermitente): otra vuelta
+    // antes que quedarse con uno mas viejo; en la ultima, vale el que abrio
+    const pendiente = candidatoPorReintentar(candidatos, elegido, hoy);
+    if (pendiente && !ultimaVuelta) {
+      throw new ReintentableAuto(`no se pudo leer ${pendiente.origen} ${pendiente.curso} ${pendiente.fecha}: ${pendiente.motivo}`);
+    }
+    const descartados = candidatos.filter((c) => c.abre === false && cursoVigente(c.fechaIso, hoy) && (!elegido || c.fechaIso > elegido.fechaIso));
+    for (const c of descartados) {
+      avisos.push(`${c.origen} ${c.curso} ${c.fecha || cortaDeIso(c.fechaIso)}: no abre (${c.motivo || "sin certificado"}): se usó ${elegido ? `${elegido.origen} ${cortaDeIso(elegido.fechaIso)}` : "ningún otro"}`);
+    }
+    if (pendiente && !descartados.includes(pendiente)) avisos.push(`${pendiente.origen} ${pendiente.archivo || pendiente.curso}: no se pudo leer (${pendiente.motivo})`);
     if (elegido) logAuto(`elegido: ${elegido.origen} ${elegido.curso} ${cortaDeIso(elegido.fechaIso)}`, "info", dni);
 
     const plan = planFechas(ficha, elegido, CRITERIOS_AUTO);
@@ -3193,7 +3215,7 @@ export function montarRenovacion() {
           if (!e.criteriosOk && FICHA_LISTA.has(s.estado) && !s.cargando) {
             ctx.contador.n++;
             logAuto(`---- ${ctx.contador.n} · ficha lista (${s.estado}) ----`, "head", dni);
-            const r = await aplicarCriteriosAuto(dni, ctx.consulta, ctx.hoy);
+            const r = await aplicarCriteriosAuto(dni, ctx.consulta, ctx.hoy, e.ultimaVuelta);
             Object.assign(e, { criteriosOk: true, esperadas: r.esperadas, faltan: r.faltan, avisos: [...r.avisos] });
             Object.assign(e.resultado, { nombre: r.nombre, cambios: r.cambios.join(" | "), faltaActualizar: r.faltan.join(" | ") });
             for (const c of r.cambios) logAuto(`${ctx.consulta ? "haría" : "hecho"}: ${c}`, "ok", dni);

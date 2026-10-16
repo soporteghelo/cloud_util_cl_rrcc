@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import {
   candidatosLaterales,
   elegirCertificadoLateral,
+  candidatoPorReintentar,
+  CRITERIOS_AUTO,
   planFechas,
   planQuitar,
   faltaActualizar,
@@ -79,6 +81,54 @@ test("elegido: el mas reciente entre los vigentes", () => {
   assert.equal(elegirCertificadoLateral(c, HOY), null);
 });
 
+test("elegido: un RIESGOS CRITICOS de EIN que no abre se salta y manda el siguiente que abre", () => {
+  // el caso real: varios RIESGOS CRITICOS en EIN, los mas nuevos "sin certificado emitido"
+  const laterales = [
+    ["rc0410", "04/10/2026"],
+    ["rc2509", "25/09/2026"],
+    ["rc2009", "20/09/2026"],
+    ["rc1309", "13/09/2026"],
+  ].map(([id, fecha]) => ({ origen: "EIN", clave: `EIN|${id}|`, curso: "RIESGOS CRITICOS", fecha, descargable: true, excluido: false }));
+  const f = ficha({ laterales });
+  const c = candidatosLaterales(f);
+  for (const x of c) x.abre = x.clave === "EIN|rc1309|";
+  const elegido = elegirCertificadoLateral(c, HOY);
+  assert.equal(elegido.clave, "EIN|rc1309|");
+  assert.equal(candidatoPorReintentar(c, elegido, HOY), null, "sin certificado emitido no se reintenta");
+  // del panel queda el que abre; los que no abren se quitan
+  const quitar = planQuitar(f, elegido, c).map((q) => q.clave);
+  assert.ok(!quitar.includes("EIN|rc1309|"));
+  assert.ok(["EIN|rc0410|", "EIN|rc2509|", "EIN|rc2009|"].every((k) => quitar.includes(k)));
+  // ninguno vigente: el respaldo tampoco es uno que no abre
+  for (const x of c) x.fechaIso = x.fechaIso.replace("2026", "2024");
+  assert.ok(!planQuitar(f, null, c).some((q) => q.clave === "EIN|rc1309|"));
+});
+
+test("elegido: el panel SIN CERTIFICADO (no descargable) no cuenta", () => {
+  const f = ficha();
+  f.laterales[0].descargable = false;
+  const c = candidatosLaterales(f);
+  assert.equal(c[0].abre, false);
+  assert.equal(c[0].leerPdf, false);
+  c[1].fechaIso = "2024-01-01";
+  assert.equal(elegirCertificadoLateral(c, HOY), null);
+});
+
+test("candidatoPorReintentar: un error pasajero en uno mas nuevo pide otra vuelta", () => {
+  const c = [
+    { origen: "EIN", clave: "a", fechaIso: "2026-10-04", abre: false, fallaPasajera: true },
+    { origen: "EIN", clave: "b", fechaIso: "2026-09-13", abre: true },
+  ];
+  const elegido = elegirCertificadoLateral(c, HOY);
+  assert.equal(elegido.clave, "b");
+  assert.equal(candidatoPorReintentar(c, elegido, HOY).clave, "a");
+  c[0].fechaIso = "2026-09-01"; // mas viejo que el elegido: no hace falta
+  assert.equal(candidatoPorReintentar(c, elegido, HOY), null);
+  // una induccion que no se pudo leer no tiene fecha: se reintenta
+  c.push({ origen: "INDUCCION", clave: "i", fechaIso: null, abre: false, fallaPasajera: true });
+  assert.equal(candidatoPorReintentar(c, elegido, HOY).clave, "i");
+});
+
 test("planFechas: HM/ES y los C de la lista con la fecha del elegido; demas C a –; A segun su certificado", () => {
   const f = ficha();
   const elegido = { origen: "EIN", clave: "EIN|rc1|", fechaIso: "2026-08-20" };
@@ -90,14 +140,36 @@ test("planFechas: HM/ES y los C de la lista con la fecha del elegido; demas C a 
     TA: "2027-08-20",
     HP: null,
     EC: "2027-03-02",
+    SP: null,
   });
   assert.deepEqual(plan.acciones.find((a) => a.codigo === "HP"), { codigo: "HP", tipo: "" });
   assert.deepEqual(plan.acciones.find((a) => a.codigo === "TA"), { codigo: "TA", venc: "2027-08-20" }, "TA en C no pasa a –");
   assert.ok(plan.avisos.some((a) => a.startsWith("IZ (A): su certificado es de EIN")));
-  assert.ok(plan.avisos.some((a) => a.startsWith("SP (A): sin certificado")));
+  // un A sin certificado pasa a –
+  assert.deepEqual(plan.acciones.find((a) => a.codigo === "SP"), { codigo: "SP", tipo: "" });
   // una fecha que ya esta bien no se toca
   f.riesgos.find((r) => r.codigo === "EC").venc = "2027-03-02";
   assert.ok(!planFechas(f, elegido).acciones.some((a) => a.codigo === "EC"));
+});
+
+test("planFechas: A sin certificado pasa a –, salvo HM y ES", () => {
+  const f = ficha();
+  f.riesgos.find((r) => r.codigo === "HM").sinCert = true;
+  f.riesgos.find((r) => r.codigo === "ES").sinCert = true;
+  f.riesgos.push(riesgo("CS2", "A", "2027-10-14", { sinCert: true }));
+  const plan = planFechas(f, { origen: "EIN", clave: "EIN|rc1|", fechaIso: "2026-08-20" });
+  assert.deepEqual(plan.acciones.find((a) => a.codigo === "CS2"), { codigo: "CS2", tipo: "" });
+  assert.equal(plan.esperadas.CS2, null);
+  for (const codigo of ["HM", "ES"]) {
+    assert.ok(!plan.acciones.some((a) => a.codigo === codigo && a.tipo === ""), `${codigo} no pasa a –`);
+    assert.equal(plan.esperadas[codigo], "2027-08-20");
+  }
+  // sin elegido HM/ES tampoco pasan a –
+  assert.ok(!planFechas(f, null).acciones.some((a) => ["HM", "ES"].includes(a.codigo) && a.tipo === ""));
+  // con el interruptor apagado solo avisa
+  const apagado = planFechas(f, null, { ...CRITERIOS_AUTO, aSinCertificadoSinTipo: false });
+  assert.ok(!apagado.acciones.some((a) => a.codigo === "CS2"));
+  assert.ok(apagado.avisos.some((a) => a.startsWith("CS2 (A): sin certificado")));
 });
 
 test("planFechas sin elegido: HM/ES y los C de la lista no se tocan y se avisa", () => {
