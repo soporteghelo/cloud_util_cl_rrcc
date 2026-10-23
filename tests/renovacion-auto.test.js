@@ -140,13 +140,13 @@ test("planFechas: HM/ES y los C de la lista con la fecha del elegido; demas C a 
     TA: "2027-08-20",
     HP: null,
     EC: "2027-03-02",
-    SP: null,
+    SP: "2027-08-20",
   });
   assert.deepEqual(plan.acciones.find((a) => a.codigo === "HP"), { codigo: "HP", tipo: "" });
   assert.deepEqual(plan.acciones.find((a) => a.codigo === "TA"), { codigo: "TA", venc: "2027-08-20" }, "TA en C no pasa a –");
   assert.ok(plan.avisos.some((a) => a.startsWith("IZ (A): su certificado es de EIN")));
-  // un A sin certificado pasa a –
-  assert.deepEqual(plan.acciones.find((a) => a.codigo === "SP"), { codigo: "SP", tipo: "" });
+  // un curso base en A sin certificado pasa a C con la fecha del elegido
+  assert.deepEqual(plan.acciones.filter((a) => a.codigo === "SP"), [{ codigo: "SP", tipo: "C" }, { codigo: "SP", venc: "2027-08-20" }]);
   // una fecha que ya esta bien no se toca
   f.riesgos.find((r) => r.codigo === "EC").venc = "2027-03-02";
   assert.ok(!planFechas(f, elegido).acciones.some((a) => a.codigo === "EC"));
@@ -175,6 +175,27 @@ test("planFechas: A sin certificado pasa a –, salvo HM, ES y VEM", () => {
   const apagado = planFechas(f, null, { ...CRITERIOS_AUTO, aSinCertificadoSinTipo: false });
   assert.ok(!apagado.acciones.some((a) => a.codigo === "CS2"));
   assert.ok(apagado.avisos.some((a) => a.startsWith("CS2 (A): sin certificado")));
+});
+
+test("planFechas: cursos base en – pasan a C con la fecha de su curso (HM a A); los demas – no se tocan", () => {
+  const f = ficha();
+  f.riesgos = f.riesgos.filter((r) => !["HM", "TA", "VEM"].includes(r.codigo));
+  for (const codigo of ["HM", "TA", "VEM", "SQ", "AE", "IE"]) f.riesgos.push(riesgo(codigo, ""));
+  const elegido = { origen: "EIN", clave: "EIN|rc1|", fechaIso: "2026-08-20", fechas: { TA: "2026-08-18", HM: "2026-08-19", AE: "2026-08-17" } };
+  const plan = planFechas(f, elegido);
+  assert.deepEqual(plan.acciones.filter((a) => a.codigo === "TA"), [{ codigo: "TA", tipo: "C" }, { codigo: "TA", venc: "2027-08-18" }]);
+  assert.deepEqual(plan.acciones.filter((a) => a.codigo === "AE"), [{ codigo: "AE", tipo: "C" }, { codigo: "AE", venc: "2027-08-17" }]);
+  // sin fila propia en la tabla: la de HM/ES
+  assert.equal(plan.esperadas.SQ, "2027-08-19");
+  assert.deepEqual(plan.acciones.filter((a) => a.codigo === "HM"), [{ codigo: "HM", tipo: "A" }, { codigo: "HM", venc: "2027-08-19" }]);
+  // IE no es curso base y VEM no pasa a C: siguen en –
+  assert.ok(!plan.acciones.some((a) => ["IE", "VEM"].includes(a.codigo)));
+  // sin elegido: no hay fecha, siguen en – y se avisa
+  const sin = planFechas(f, null);
+  assert.ok(!sin.acciones.some((a) => ["TA", "VEM", "SQ", "AE"].includes(a.codigo)));
+  assert.ok(sin.avisos.some((a) => a.startsWith("TA (–): sin certificado")));
+  // con el interruptor apagado no cambian
+  assert.ok(!planFechas(f, elegido, { ...CRITERIOS_AUTO, cursosBaseEnC: false }).acciones.some((a) => a.codigo === "TA"));
 });
 
 test("planFechas sin elegido: HM/ES y los C de la lista no se tocan y se avisa", () => {

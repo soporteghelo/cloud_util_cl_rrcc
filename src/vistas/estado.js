@@ -22,14 +22,25 @@ import {
 import {
   obtenerContexto,
   obtenerPersonal,
+  obtenerPersona,
   personalEnMemoria,
   personalGuardado,
   edadPersonal,
   alCambiar,
 } from "../lib/datos.js";
 import { armarXlsx } from "../lib/excel.js";
-import { personasPorRiesgo, agruparPorGuardia, guardiaDe, aFormatoCorto, aIso, hoyIso } from "../../shared/estados.js";
-import { RRCC } from "../../shared/rrcc.js";
+import { guardarFilaVerificada } from "../lib/renovacion.js";
+import {
+  personasPorRiesgo,
+  agruparPorGuardia,
+  guardiaDe,
+  aFormatoCorto,
+  aIso,
+  hoyIso,
+  aplicarEdicionesManuales,
+  SIEMPRE_A,
+} from "../../shared/estados.js";
+import { RRCC, colTipo } from "../../shared/rrcc.js";
 
 const CLASE_ESTADO = {
   VIGENTE: "et-vigente",
@@ -95,6 +106,7 @@ export function montarEstado() {
   let cargando = false;
   let visible = { grupos: [], vencHasta: "" }; // lo ultimo pintado, que es lo que se imprime y se exporta
   const ordenPorGrupo = new Map(); // codigo RRCC -> { campo, direccion }, al hacer clic en un encabezado
+  const cambiandoTipo = new Map(); // "dni|codigo" -> tipo que se esta guardando ("C" o ""), sobrevive a un repintado
 
   const selRiesgo = crearMultiSelect(
     "es-riesgo",
@@ -133,16 +145,35 @@ export function montarEstado() {
 
   function htmlDeGrupo(grupo, vencHasta) {
     const orden = ordenPorGrupo.get(grupo.codigo);
+    // ES y HM son siempre "A": no se ofrece "C" (si "–")
+    const soloA = SIEMPRE_A.includes(grupo.codigo);
     const filaHtml = ({ persona, riesgo, estado }) => {
       const clase = CLASE_ESTADO[estado] || "et-noaplica";
+      const destino = cambiandoTipo.get(`${persona.dni}|${grupo.codigo}`);
+      const guardando = destino !== undefined;
+      const titulo =
+        (soloA ? `${grupo.codigo} no puede ser "C". ` : `"C" (capacitado) conserva la fecha. `) +
+        `"–" (sin tipo) borra la fecha. Se guarda en la hoja y la fila sale de este reporte`;
+      const opciones = soloA ? ["A", ""] : ["A", "C", ""];
+      const selector =
+        `<select class="es-tipo-sel" data-tipo-dni="${escaparHtml(persona.dni)}" data-tipo-codigo="${grupo.codigo}" ` +
+        `aria-label="Tipo de ${escaparHtml(grupo.codigo)} de ${escaparHtml(persona.nombreCompleto)}" title="${titulo}"${guardando ? " disabled" : ""}>` +
+        opciones
+          .map((t) => {
+            const elegido = guardando ? t === destino : t === "A";
+            return `<option value="${t}"${elegido ? " selected" : ""}>${t || "–"}${elegido && guardando ? " · guardando…" : ""}</option>`;
+          })
+          .join("") +
+        `</select>`;
       return (
-        `<tr class="${clase}">` +
+        `<tr class="${clase}${guardando ? " es-guardando" : ""}">` +
         `<td>${escaparHtml(persona.dni)}</td>` +
         `<td>${escaparHtml(persona.cargo) || "—"}</td>` +
         `<td>${escaparHtml(persona.area) || "—"}</td>` +
         `<td>${escaparHtml(persona.nombreCompleto)}</td>` +
         `<td><span class="et-badge ${clase}">${estado}</span></td>` +
         `<td>${aFormatoCorto(riesgo.venc) || "—"}</td>` +
+        `<td class="es-tipo">${selector}</td>` +
         `</tr>`
       );
     };
@@ -155,7 +186,7 @@ export function montarEstado() {
       .map(
         (sub) =>
           `<tbody class="estado-guardia">` +
-          `<tr class="estado-guardia-titulo"><th colspan="${COLUMNAS.length}">${escaparHtml(sub.rotulo)}<span>${sub.items.length}</span></th></tr>` +
+          `<tr class="estado-guardia-titulo"><th colspan="${COLUMNAS.length + 1}">${escaparHtml(sub.rotulo)}<span>${sub.items.length}</span></th></tr>` +
           sub.items.map(filaHtml).join("") +
           `</tbody>`
       )
@@ -189,10 +220,10 @@ export function montarEstado() {
       `<section class="estado-grupo">` +
       `<div class="estado-grupo-head"><b>${grupo.codigo} · ${escaparHtml(grupo.nombre)}</b><span>${grupo.items.length}</span></div>` +
       `<table class="estado-tabla" data-codigo="${grupo.codigo}">` +
-      `<colgroup><col class="ec-dni" /><col class="ec-cargo" /><col class="ec-area" /><col class="ec-nombre" /><col class="ec-estado" /><col class="ec-fecha" /></colgroup>` +
+      `<colgroup><col class="ec-dni" /><col class="ec-cargo" /><col class="ec-area" /><col class="ec-nombre" /><col class="ec-estado" /><col class="ec-fecha" /><col class="ec-tipo" /></colgroup>` +
       `<thead>` +
-      `<tr class="estado-tabla-titulo"><th colspan="${COLUMNAS.length}">${grupo.codigo} · ${escaparHtml(grupo.nombre)} (${grupo.items.length})${corte}</th></tr>` +
-      `<tr>${encabezado}</tr>` +
+      `<tr class="estado-tabla-titulo"><th colspan="${COLUMNAS.length + 1}">${grupo.codigo} · ${escaparHtml(grupo.nombre)} (${grupo.items.length})${corte}</th></tr>` +
+      `<tr>${encabezado}<th class="es-tipo">Tipo</th></tr>` +
       `</thead>${cuerpos}</table>` +
       `</section>`
     );
@@ -401,6 +432,50 @@ export function montarEstado() {
     ordenPorGrupo.set(codigo, { campo, direccion });
     pintar();
   }
+  /**
+   * "A" -> "C" o "–" de un RRCC de una persona. Se parte de la fila recien
+   * leida de la hoja (no de la lista en memoria, que puede ser de hace rato)
+   * y se guarda con el mismo guardado verificado que RENOVACION: al
+   * confirmarse, la persona se parchea en el listado compartido y la fila sale
+   * sola de este reporte (aqui solo entran los "A"). "C" conserva la fecha;
+   * "–" la deja vacia (capacitacion, vigencia y estado), como en la ficha.
+   */
+  async function cambiarTipo(dni, codigo, tipo) {
+    const clave = `${dni}|${codigo}`;
+    if (cambiandoTipo.has(clave)) return;
+    const texto = tipo || "–";
+    cambiandoTipo.set(clave, tipo);
+    pintar();
+    try {
+      const leido = await obtenerPersona(dni, { refrescar: true });
+      if (!leido?.encontrada) throw new Error("no está en la base");
+      const actual = String(leido.valores[colTipo(codigo)] || "").trim().toUpperCase();
+      if (actual !== "A") {
+        consola(`${dni} · ${codigo}: en la hoja ya no es "A" (${actual || "–"}): no se cambió`, "warn");
+        return;
+      }
+      const edicion = tipo ? { tipo } : { tipo: "", venc: "" };
+      const valores = aplicarEdicionesManuales(leido.valores, { [codigo]: edicion }, { config: contexto?.config });
+      const r = await guardarFilaVerificada({ fila: leido.fila, valores, dni, codigos: [codigo] });
+      if (!r.confirmado) {
+        const dif = r.diferencias.map((d) => `${d.campo} ${d.real || "vacío"} en vez de ${d.esperado || "vacío"}`).join("; ");
+        throw new Error(`la hoja no quedó como se pidió (${dif})`);
+      }
+      consola(`${dni} · ${codigo}: A -> ${texto} guardado en la hoja${tipo ? "" : " (fecha borrada)"}`, "ok");
+    } catch (e) {
+      consola(`${dni} · ${codigo}: no se pudo pasar a ${texto}: ${e.message}`, "err");
+      notificar(`No se pudo pasar a ${texto}`, `${dni} · ${codigo}: ${e.message}`, "warn");
+    } finally {
+      cambiandoTipo.delete(clave);
+      pintar();
+    }
+  }
+  el.resultados.addEventListener("change", (ev) => {
+    const sel = ev.target.closest("select[data-tipo-dni]");
+    if (!sel || sel.value === "A") return;
+    cambiarTipo(sel.dataset.tipoDni, sel.dataset.tipoCodigo, sel.value);
+  });
+
   el.resultados.addEventListener("click", (ev) => {
     const th = ev.target.closest("th[data-campo]");
     if (th) ordenarPorEncabezado(th);

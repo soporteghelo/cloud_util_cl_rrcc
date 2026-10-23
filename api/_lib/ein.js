@@ -181,21 +181,39 @@ async function iniciarSesion(usuario, password) {
 }
 
 /**
+ * Todo lo que habla con EIN (buscar, abrir reporte, exportar) va de a uno.
+ *
+ * La sesion es una sola (WebForms + Crystal guardan el estado del grid y del
+ * reporte en ella): una busqueda o un "Selec." de otra persona metido entre
+ * la busqueda y la exportacion de este certificado hacia que EIN devolviera
+ * el reporte de otro, o ninguno. En un lote de varios DNI eso se llevaba
+ * certificados del ZIP. En serie no se cruzan.
+ */
+let filaEin = Promise.resolve();
+function enFilaEin(fn) {
+  const turno = filaEin.then(fn, fn);
+  filaEin = turno.catch(() => {});
+  return turno;
+}
+
+/**
  * Busca los cursos de `dni` en EIN, logueandose solo si hace falta.
  * Devuelve lo mismo que `einBuscar` (mas `cookie`/`empresa` ya frescos para
  * que quien llame se los pase a la descarga).
  */
-export async function einBuscarConSesion(dni, usuario, password) {
-  const previa = sesionFresca(usuario);
-  try {
-    const activa = previa || (await iniciarSesion(usuario, password));
-    return await einBuscar(dni, activa.cookie);
-  } catch (e) {
-    if (!previa) throw e; // ya era login fresco: no hay nada mas que probar
-    sesion = null;
-    const nueva = await iniciarSesion(usuario, password);
-    return einBuscar(dni, nueva.cookie);
-  }
+export function einBuscarConSesion(dni, usuario, password) {
+  return enFilaEin(async () => {
+    const previa = sesionFresca(usuario);
+    try {
+      const activa = previa || (await iniciarSesion(usuario, password));
+      return await einBuscar(dni, activa.cookie);
+    } catch (e) {
+      if (!previa) throw e; // ya era login fresco: no hay nada mas que probar
+      sesion = null;
+      const nueva = await iniciarSesion(usuario, password);
+      return einBuscar(dni, nueva.cookie);
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -370,8 +388,28 @@ function validarPdf(buffer, cod, dni) {
 /**
  * Descarga y valida el certificado de una fila. Devuelve el buffer del PDF,
  * o null si el curso no tiene certificado emitido (desaprobado, por ej.).
+ *
+ * La cookie que trae el navegador es la de la busqueda: en un lote la
+ * carpeta de los primeros DNI se arma varios minutos despues y esa sesion ya
+ * expiro. Se usa la sesion mas reciente del proceso si hay, y si EIN la da
+ * por vencida se vuelve a loguear (con `usuario`/`password`) una vez.
  */
-export async function einDescargar({ dni, indice, cod, cookie, empresa }) {
+export function einDescargar(datos, usuario, password) {
+  return enFilaEin(async () => {
+    const reciente = usuario ? sesionFresca(usuario) : null;
+    const cookie = reciente?.cookie || datos.cookie;
+    try {
+      return await descargarConCookie({ ...datos, cookie });
+    } catch (e) {
+      if (!usuario || !password || !/sesion EIN expirada/i.test(e.message)) throw e;
+      sesion = null;
+      const nueva = await iniciarSesion(usuario, password);
+      return descargarConCookie({ ...datos, cookie: nueva.cookie });
+    }
+  });
+}
+
+async function descargarConCookie({ dni, indice, cod, cookie, empresa }) {
   let cookieActual = cookie;
 
   for (let intento = 1; intento <= EIN_INTENTOS_VALIDACION; intento++) {

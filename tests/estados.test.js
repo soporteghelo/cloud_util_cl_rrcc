@@ -40,6 +40,8 @@ import {
   agruparPorGuardia,
   riesgosProblemaDe,
   tipoObligado,
+  esJalado,
+  jaladoVigente,
 } from "../shared/estados.js";
 import { CABECERA, INDICE, CODIGOS_RRCC, colCap, colVenc, colTipo, colEstado } from "../shared/rrcc.js";
 
@@ -863,4 +865,29 @@ test("ediciones a mano y matriz: HM/ES no pueden quedar en C; aplicar C no los t
   assert.equal(conC[colTipo("HM")], "");
   assert.equal(conC[colCap("ES")], "");
   assert.equal(admiteAplicarC("HM", "C"), false);
+});
+
+test("esJalado: DESAPROBADO de EIN o el texto de JOMISER; NSP y APROBADO no", () => {
+  assert.ok(esJalado({ condicion: "DESAPROBADO" }));
+  assert.ok(esJalado({ estado: "Jalado" }));
+  assert.ok(!esJalado({ condicion: "APROBADO" }));
+  assert.ok(!esJalado({ condicion: "NSP" }));
+  assert.ok(!esJalado({ condicion: "", estado: "PENDIENTE" }));
+});
+
+test("elegirCertificados: un jalado no da capacitacion y marca la tarjeta si es el ultimo intento", () => {
+  const r = elegirCertificados(
+    [
+      { curso: "TRABAJOS EN ALTURA", fecha: "2026-01-10", origen: "JOMISER" },
+      { curso: "TRABAJOS EN ALTURA", fecha: "2026-09-10", origen: "EIN", condicion: "DESAPROBADO" },
+      { curso: "CARGAS SUSPENDIDAS", fecha: "2026-03-01", origen: "EIN", condicion: "DESAPROBADO" },
+      { curso: "CARGAS SUSPENDIDAS", fecha: "2026-05-01", origen: "JOMISER" },
+    ],
+    dic
+  );
+  assert.equal(r.porRrcc.get("TA").fecha, "2026-01-10", "el jalado no pisa el certificado aprobado");
+  assert.equal(r.jalados.get("TA").fecha, "2026-09-10");
+  assert.ok(jaladoVigente(r.jalados.get("TA"), r.porRrcc.get("TA")), "ultimo intento jalado: se marca");
+  assert.equal(jaladoVigente(r.jalados.get("CS"), r.porRrcc.get("CS")), null, "aprobo despues: no se marca");
+  assert.ok(jaladoVigente({ fecha: "2026-01-01" }, null), "sin certificado: se marca");
 });

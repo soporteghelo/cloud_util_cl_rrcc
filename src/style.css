@@ -452,13 +452,15 @@ h1 {
 /* Se repite mientras la fecha editable no coincida con la del certificado: una
    sacudida marcada cada ciclo, con una pausa corta entre medio para que no
    canse la vista pero deje claro que la discrepancia sigue sin resolverse. */
+/* Solo transform: con box-shadow en los keyframes la animacion corria en el
+   hilo principal y repintaba cada cuadro; con varias fichas abiertas eso
+   hacia que la pagina se arrastrara. El brillo queda fijo en la clase. */
 @keyframes rrcc-vibrar {
-  0%, 9%, 100% { transform: translateX(0) rotate(0deg); box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35), 0 0 18px rgba(251, 191, 36, 0.14); }
+  0%, 9%, 100% { transform: translateX(0) rotate(0deg); }
   1% { transform: translateX(-4px) rotate(-1.5deg); }
   2% { transform: translateX(4px) rotate(1.5deg); }
   3% { transform: translateX(-4px) rotate(-1.3deg); }
   4% { transform: translateX(4px) rotate(1.3deg); }
-  4.5% { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.9), 0 0 26px rgba(251, 191, 36, 0.55); }
   5% { transform: translateX(-3px) rotate(-0.9deg); }
   6% { transform: translateX(3px) rotate(0.9deg); }
   7% { transform: translateX(-1.5px) rotate(-0.4deg); }
@@ -1101,14 +1103,60 @@ input[type="date"].inp { color-scheme: dark; }
 /* el color del borde izquierdo es el estado; la insignia, el tipo A o C */
 .rc-vigente    { border-left-color: var(--gr); }
 .rc-actualizar { border-color: rgba(251, 191, 36, 0.9); border-left-color: var(--am); background: rgba(251, 191, 36, 0.12); }
-.rc-vencido    { border-color: rgba(255, 68, 102, 0.95); border-left-color: var(--rd); background: rgba(255, 68, 102, 0.15); animation: rrcc-vencido 1.35s ease-in-out infinite; }
+.rc-vencido    { border-color: rgba(255, 68, 102, 0.95); border-left-color: var(--rd); background: rgba(255, 68, 102, 0.15); }
+/* el latido rojo es un brillo fijo en ::before al que solo se le anima la
+   opacidad: lo mueve la GPU sin repintar la tarjeta en cada cuadro */
+.rc-vencido { isolation: isolate; } /* el brillo (z-index -1) queda sobre el fondo y bajo el texto */
+.rc-vencido::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 16px rgba(255, 68, 102, 0.14), 0 0 12px rgba(255, 68, 102, 0.55);
+  opacity: 0;
+  animation: rrcc-vencido 1.35s ease-in-out infinite;
+}
 .rc-noaplica   { border-left-color: var(--line); opacity: 0.55; }
 
-@keyframes rrcc-vencido {
-  0%, 100% { box-shadow: inset 0 0 0 0 rgba(255, 68, 102, 0), 0 0 0 0 rgba(255, 68, 102, 0); }
-  50% { box-shadow: inset 0 0 16px rgba(255, 68, 102, 0.14), 0 0 12px rgba(255, 68, 102, 0.55); }
+/* curso jalado: una "X" grande sobre toda la tarjeta, que deja pasar los clics */
+.rc-jalado { position: relative; border-color: var(--rd); opacity: 1; }
+.rc-jalado-x { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.rc-jalado-x::before, .rc-jalado-x::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 140%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rd);
+  box-shadow: 0 0 8px rgba(255, 77, 109, 0.6);
+  opacity: 0.85;
 }
-@media (prefers-reduced-motion: reduce) { .rc-vencido { animation: none; } }
+.rc-jalado-x::before { transform: translate(-50%, -50%) rotate(31deg); }
+.rc-jalado-x::after { transform: translate(-50%, -50%) rotate(-31deg); }
+.rc .rc-jalado-tag {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  z-index: 3;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--rd);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.cert-fila.cert-jalado .cert-item { border-left-color: var(--rd); }
+.cert-fila.cert-jalado .cert-item span { color: var(--rd); font-weight: 700; }
+
+@keyframes rrcc-vencido {
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .rc-vencido::before { animation: none; } }
 
 .rc-tipo {
   float: right;
@@ -1388,7 +1436,30 @@ button.cert-fecha:hover, button.cert-fecha:focus-visible { background: rgba(0, 2
 /* Ficha de renovacion. La barra de arriba (identificacion, fotocheck, aplicar C
    y guardar cambios) se queda fija al desplazarse el panel; debajo va la
    informacion de la persona y el texto de referencia. */
-.card-ficha { overflow: clip; }
+/* Con un lote de varios DNI hay muchas fichas largas: el navegador no
+   dibuja (ni anima) las que estan fuera de pantalla hasta acercarse a ellas.
+   `auto` recuerda la altura real de cada una para que la barra de
+   desplazamiento no salte. */
+.card-ficha { overflow: clip; content-visibility: auto; contain-intrinsic-size: auto 900px; }
+.card-ficha[hidden] { display: none; }
+
+/* buscador de fichas en la cabecera de 02 · AUTORIZACIONES */
+.rn-buscar { flex: 1 1 260px; max-width: 420px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rn-buscar input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--tx);
+  background: #05090f;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.rn-buscar input:focus { outline: none; border-color: var(--cy); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.13); }
+.rn-buscar span { font-size: 10.5px; font-weight: 700; color: var(--cy); white-space: nowrap; }
+.rn-buscar span:empty { display: none; }
 .card-barra,
 .card-head-ren {
   display: grid;
@@ -1558,6 +1629,7 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
      editable vuelve a coincidir con la del certificado (ver diferenciaFechaEditableConCertificado). */
   animation: rrcc-vibrar 1.8s ease-in-out infinite;
   border-color: rgba(251, 191, 36, 0.9);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35), 0 0 18px rgba(251, 191, 36, 0.14);
 }
 @media (prefers-reduced-motion: reduce) {
   .rc-fecha-diferente { animation: none; box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.9), 0 0 26px rgba(251, 191, 36, 0.4); }
@@ -1769,12 +1841,29 @@ select.rc-tipo option { color: var(--tx); background: #05090f; }
 .estado-grupo .estado-tabla td { padding: 4px 6px; }
 .estado-grupo .estado-tabla th { font-size: 8.5px; }
 .estado-grupo .et-badge { padding: 1px 6px; font-size: 8.5px; }
-.estado-grupo .estado-tabla col.ec-dni    { width: 11%; }
-.estado-grupo .estado-tabla col.ec-cargo  { width: 21%; }
-.estado-grupo .estado-tabla col.ec-area   { width: 12%; }
-.estado-grupo .estado-tabla col.ec-nombre { width: 24%; }
-.estado-grupo .estado-tabla col.ec-estado { width: 17%; }
-.estado-grupo .estado-tabla col.ec-fecha  { width: 15%; }
+.estado-grupo .estado-tabla col.ec-dni    { width: 10%; }
+.estado-grupo .estado-tabla col.ec-cargo  { width: 19%; }
+.estado-grupo .estado-tabla col.ec-area   { width: 11%; }
+.estado-grupo .estado-tabla col.ec-nombre { width: 23%; }
+.estado-grupo .estado-tabla col.ec-estado { width: 15%; }
+.estado-grupo .estado-tabla col.ec-fecha  { width: 14%; }
+.estado-grupo .estado-tabla col.ec-tipo   { width: 8%; }
+/* Tipo: A -> C desde el reporte (no se imprime ni va al Excel) */
+.estado-tabla .es-tipo-sel {
+  width: 100%;
+  min-height: 22px;
+  padding: 1px 3px;
+  color: var(--gr);
+  background: #08121a;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 700;
+  color-scheme: dark;
+  cursor: pointer;
+}
+.estado-tabla .es-tipo-sel:disabled { cursor: default; opacity: 0.6; }
+.estado-tabla tr.es-guardando { opacity: 0.5; }
 .estado-grupo .estado-tabla td:nth-child(2),
 .estado-grupo .estado-tabla td:nth-child(3),
 .estado-grupo .estado-tabla td:nth-child(4) { white-space: normal; min-width: 0; }
@@ -2285,6 +2374,9 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   #vista-estado .panel-res::after { display: none; }
   #vista-estado .panel-head { display: none; }
   #vista-estado .panel-body { overflow: visible; padding: 0; }
+  /* el desplegable A/C es para trabajar en pantalla: lo impreso sigue como antes */
+  #vista-estado .estado-tabla .es-tipo,
+  #vista-estado .estado-tabla col.ec-tipo { display: none; }
 
   /* ESTADO TOTAL: lo que se imprime es la vista previa del informe (el
      flotante), no la vista de detras. Asi lo impreso es exactamente lo que
@@ -2430,7 +2522,25 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 .rc-fecha-diferente .rrcc-fecha {
   border-color: var(--am);
   background: rgba(251, 191, 36, 0.16);
+  isolation: isolate;
+}
+/* latidos: brillo fijo en ::before, solo se anima la opacidad (ver .rc-vencido) */
+.rc-fecha-diferente .rrcc-fecha::before,
+.pend-dif::before,
+.pend-venc::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.45), 0 0 16px rgba(251, 191, 36, 0.5);
+  opacity: 0;
   animation: rc-fecha-latido 1.2s ease-in-out infinite;
+}
+.pend-venc::before { box-shadow: 0 0 0 3px rgba(255, 77, 109, 0.45), 0 0 16px rgba(255, 77, 109, 0.6); }
+@media (prefers-reduced-motion: reduce) {
+  .rc-fecha-diferente .rrcc-fecha::before, .pend-dif::before, .pend-venc::before { animation: none; }
 }
 .rc-fecha-diferente .rrcc-fecha small { color: var(--am); }
 .rc-fecha-diferente .rrcc-fecha input {
@@ -2449,8 +2559,7 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   border-radius: 2px;
 }
 @keyframes rc-fecha-latido {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
-  50% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.45), 0 0 16px rgba(251, 191, 36, 0.5); }
+  50% { opacity: 1; }
 }
 
 /* atajo: copiar la vigencia del certificado a la hoja */
@@ -2494,15 +2603,11 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   background: transparent;
 }
 button.pend-chip { cursor: pointer; }
-.pend-dif { color: #04070c; background: var(--am); border-color: var(--am); animation: rc-fecha-latido 1.2s ease-in-out infinite; }
-.pend-venc { color: #fff; background: var(--rd); border-color: var(--rd); animation: rc-fecha-latido-rojo 1.2s ease-in-out infinite; }
+.pend-dif { position: relative; isolation: isolate; color: #04070c; background: var(--am); border-color: var(--am); }
+.pend-venc { position: relative; isolation: isolate; color: #fff; background: var(--rd); border-color: var(--rd); }
 .pend-act { color: var(--am); border-color: var(--am); }
 .pend-ok { color: var(--gr); border-color: rgba(0, 255, 156, 0.5); }
 .pend-cargando { color: var(--tx-dim); border-color: var(--line); }
-@keyframes rc-fecha-latido-rojo {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 109, 0); }
-  50% { box-shadow: 0 0 0 3px rgba(255, 77, 109, 0.45), 0 0 16px rgba(255, 77, 109, 0.6); }
-}
 
 /* foto de la persona en la cabecera */
 .card-foto {

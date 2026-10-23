@@ -21,7 +21,8 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
     if (body.origen === "EIN") {
-      const pdf = await einDescargar(body);
+      // las credenciales permiten volver a loguear si la cookie de la busqueda ya expiro
+      const pdf = await einDescargar(body, process.env.EIN_USUARIO, process.env.EIN_PASSWORD);
       if (pdf === null) {
         res.status(200).json({ sinCertificado: true, motivo: "sin certificado emitido" });
         return;

@@ -435,6 +435,19 @@ export function esArchivoDePersona(item) {
  * Codigo RRCC de un item: el que ya trae (los certificados de Drive lo llevan en
  * el nombre del archivo) o, si no, el que sale del nombre del curso.
  */
+/**
+ * Curso jalado: EIN lo dice en su columna de condicion ("DESAPROBADO");
+ * JOMISER, en el texto de la fila sin certificado. "NSP" (no se presento) no
+ * es jalado.
+ */
+export function esJalado(item) {
+  const texto = String(item?.condicion || item?.estado || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase();
+  return /DESAPROBAD|JALAD|REPROBAD/.test(texto);
+}
+
 function codigoDeItem(item, dic) {
   const propio = String(item.codigo || "").trim().toUpperCase();
   if (propio && CODIGOS_RRCC.includes(propio)) return propio;
@@ -450,10 +463,14 @@ function codigoDeItem(item, dic) {
  * Los items con `respaldo` (los PDF por RRCC de las carpetas de Drive) solo
  * entran donde la fuente principal no tiene un certificado descargable de ese
  * riesgo: son para cuando JOMISER no lo trae, no compiten por fecha con el.
+ *
+ * Un curso jalado (`esJalado`) no da capacitacion: no compite; queda en
+ * `jalados` (el mas reciente por riesgo) para marcar la tarjeta.
  */
 export function elegirCertificados(items, dic) {
   const porRrcc = new Map();
   const respaldos = new Map();
+  const jalados = new Map();
   const noMapeados = [];
   const ignorados = [];
   const personales = [];
@@ -473,6 +490,11 @@ export function elegirCertificados(items, dic) {
       continue;
     }
     const cand = Object.assign({}, it, { codigo, fecha: aIso(it.fecha) });
+    if (esJalado(it)) {
+      const previo = jalados.get(codigo);
+      if (!previo || mejorQue(cand, previo)) jalados.set(codigo, cand);
+      continue;
+    }
     const destino = it.respaldo ? respaldos : porRrcc;
     const previo = destino.get(codigo);
     if (!previo || mejorQue(cand, previo, it.respaldo ? undefined : dic.fuente.get(codigo))) destino.set(codigo, cand);
@@ -483,7 +505,14 @@ export function elegirCertificados(items, dic) {
     if (!principal || principal.descargable === false) porRrcc.set(codigo, cand);
   }
 
-  return { porRrcc, noMapeados, ignorados, personales };
+  return { porRrcc, jalados, noMapeados, ignorados, personales };
+}
+
+/** El jalado que marca la tarjeta: el intento mas reciente fue jalado (null si no). */
+export function jaladoVigente(jalado, cert) {
+  if (!jalado) return null;
+  if (!cert) return jalado;
+  return !cert.fecha || (jalado.fecha && jalado.fecha >= cert.fecha) ? jalado : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -593,6 +622,7 @@ export function renovarFila(opciones) {
       cambio,
       origen: cert ? cert.origen : "",
       certificado: cert,
+      jalado: jaladoVigente(elegidos.jalados?.get(codigo), cert),
     });
   }
 

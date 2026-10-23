@@ -58,8 +58,8 @@ function texto(ctx, t, x, y, { tam = 20, negrita = false, color = "#000", alinea
 }
 
 /**
- * Un dato del fotocheck que se corrige en el Word (fechas del EMO, uso de
- * lentes y vencimiento de cada RRCC). En el Word va como texto editable encima
+ * Un dato del fotocheck que se corrige en el Word (apellidos, nombres, area,
+ * cargo, fechas del EMO, uso de lentes y vencimiento de cada RRCC). En el Word va como texto editable encima
  * de la imagen, para poder corregirlo alli sin rehacer el fotocheck: con
  * `editables` (un arreglo) no se dibuja, se anota en el con su posicion y su
  * letra (`y` es la linea base) para que el Word lo ponga en el mismo sitio.
@@ -253,10 +253,10 @@ function panelIzquierdo(ctx, p, foto, logo, editables) {
   const anchoValor = dw - 300;
   // [etiqueta, valor, y, negrita, nombre si es editable en el Word]
   const filas = [
-    ["Apellidos:", p.apellidos, 588, false],
-    ["Nombres:", p.nombres, 625, true],
-    ["Area:", p.area, 662, true],
-    ["Cargo", p.cargo, 734, true],
+    ["Apellidos:", p.apellidos, 588, false, "Apellidos"],
+    ["Nombres:", p.nombres, 625, true, "Nombres"],
+    ["Area:", p.area, 662, true, "Area"],
+    ["Cargo", p.cargo, 734, true, "Cargo"],
     ["F. Ex. Médico:", aFormatoCorto(p.examenMedico), 806, true, "F. Ex. Medico"],
     ["F. Vencimiento:", aFormatoCorto(p.vencimientoEmo), 838, true, "F. Vencimiento EMO"],
     ["Uso de Lentes:", p.usoLentes, 880, true, "Uso de Lentes"],
@@ -418,8 +418,8 @@ export const esImagenFotocheck = (nombre) => /^FOTOCHECK_.+\.(jpe?g|png)$/i.test
  * subir a Drive.
  *
  * Con `conWord`, ademas `word`: el `fotocheck` que pide `armarAutorizacion`.
- * Es la misma imagen pero sin los datos editables (fechas del EMO, uso de
- * lentes y vencimiento de cada RRCC), que el Word pone encima como texto
+ * Es la misma imagen pero sin los datos editables (apellidos, nombres, area,
+ * cargo, fechas del EMO, uso de lentes y vencimiento de cada RRCC), que el Word pone encima como texto
  * (`textos`, en pixeles del lienzo base `marco`). Se dibuja una sola vez:
  * primero sin esos datos para el Word, y luego se agregan sobre el mismo
  * lienzo para la imagen suelta.

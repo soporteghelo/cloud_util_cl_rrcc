@@ -457,12 +457,31 @@ export async function consultarPersona(dni, ctx, opciones = {}) {
 const certsEnMemoria = new Map();
 const MAX_CERTS_EN_MEMORIA = 80;
 
+/**
+ * Una descarga que falla (JOMISER o EIN lentos, un 502 de la red) se vuelve a
+ * pedir antes de rendirse: en un lote de varios DNI un solo tropiezo dejaba
+ * ese certificado fuera del ZIP. "Sin certificado emitido" no es un fallo y
+ * no se repite.
+ */
+const REINTENTOS_DESCARGA = 2;
+
+async function descargarConReintentos(cuerpo) {
+  for (let intento = 0; ; intento++) {
+    try {
+      return await descargar(cuerpo);
+    } catch (e) {
+      if (intento >= REINTENTOS_DESCARGA) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * (intento + 1)));
+    }
+  }
+}
+
 export function descargarCertificado(cert, senal) {
   const clave = claveCertificado(cert);
   const guardado = certsEnMemoria.get(clave);
   if (guardado) return guardado;
   // sin senal: un pedido compartido no se cancela porque uno de los dos se vaya
-  const p = descargar({ id: cert.id, origen: cert.origen, ...(cert.datosDescarga || {}) });
+  const p = descargarConReintentos({ id: cert.id, origen: cert.origen, ...(cert.datosDescarga || {}) });
   certsEnMemoria.set(clave, p);
   p.catch(() => certsEnMemoria.delete(clave));
   while (certsEnMemoria.size > MAX_CERTS_EN_MEMORIA) certsEnMemoria.delete(certsEnMemoria.keys().next().value);
@@ -1147,6 +1166,11 @@ export const CRITERIOS_AUTO = Object.freeze({
   // siguen en "A" con la vigencia de su certificado)
   cIgualQueHmEs: true,
   cConFechaDeHmEs: ["CS", "AE", "EC", "SP", "SQ", "TA"],
+  // los cursos base: en "–" (o "A" sin certificado) pasan a "C" con la fecha
+  // de su curso en el certificado lateral elegido. HM no puede ser "C": va en "A".
+  // VEM no: en "C" pasa a "–" (y en "–" sigue asi)
+  cursosBaseEnC: true,
+  cursosBase: ["TA", "CS", "AE", "EC", "SP", "HM", "SQ"],
   // los demas "C" pasan a "–" (sin tipo ni fecha): entre ellos IE, PM, OC,
   // VEM y AP
   demasCSinTipo: true,
@@ -1495,6 +1519,28 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
       acciones.push({ codigo, tipo: "A" });
       r.tipo = "A";
       cambios.push(`${codigo}: C -> A (siempre autorizado)`);
+    }
+  }
+
+  // cursos base sin "A" (o con un "A" sin certificado) -> "C"; la fecha se la
+  // pone el paso de los "C" de abajo, con la de su curso en el elegido
+  if (criterios.cursosBaseEnC) {
+    const siguenA = new Set((criterios.aSinCertificadoSiguenA || []).map((c) => c.toUpperCase()));
+    for (const codigo of (criterios.cursosBase || []).map((c) => c.toUpperCase())) {
+      const r = riesgos.get(codigo);
+      if (!r) continue;
+      const sinA = r.tipo === "";
+      const aSinCert = r.tipo === "A" && r.sinCert && !codigosInd.includes(codigo) && !siguenA.has(codigo);
+      if (!sinA && !aSinCert) continue;
+      if (!elegido) {
+        if (sinA) avisos.push(`${codigo} (–): sin certificado EIN/inducción vigente: no pasó a ${SIEMPRE_A.includes(codigo) ? "A" : "C"}`);
+        continue;
+      }
+      const tipo = SIEMPRE_A.includes(codigo) ? "A" : "C";
+      acciones.push({ codigo, tipo });
+      r.tipo = tipo;
+      if (aSinCert) r.sinCert = false; // ya no es un "A" sin certificado
+      cambios.push(`${codigo}: ${sinA ? "–" : "A sin certificado"} -> ${tipo} (curso base)`);
     }
   }
 

@@ -12,7 +12,8 @@
  * porque Word usa el primero para el hueco en la pagina y el segundo para el
  * dibujo; si no coinciden, la imagen sale recortada.
  *
- * Las fechas del EMO, el uso de lentes y el vencimiento de cada RRCC no van
+ * Apellidos, nombres, area, cargo, las fechas del EMO, el uso de lentes y el
+ * vencimiento de cada RRCC no van
  * en la imagen sino en cuadros de texto flotantes encima de ella, en la misma
  * letra, para poder corregirlos en el Word sin rehacer el fotocheck.
  */

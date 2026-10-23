@@ -31,6 +31,7 @@ import {
   cursoVigente,
   cortaDeIso,
   hoyLocalIso,
+  sinTildesAuto,
 } from "../lib/renovacion.js";
 import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
@@ -50,6 +51,7 @@ import {
   leerFila,
   normalizarLentes,
   SIEMPRE_A,
+  esJalado,
 } from "../../shared/estados.js";
 import { colTipo, INDICE, CODIGOS_RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
@@ -111,6 +113,8 @@ export function montarRenovacion() {
     panel: $("rn-panel-res"),
     resultados: $("rn-resultados"),
     resCount: $("rn-res-count"),
+    buscar: $("rn-buscar"),
+    buscarN: $("rn-buscar-n"),
     estadoDrive: $("rn-estado-drive"),
     estadoBase: $("estado-base"),
   };
@@ -845,7 +849,10 @@ export function montarRenovacion() {
 
   function htmlEstadoDrive() {
     const filas = [];
+    const buscado = textoBuscado();
     for (const [dni, ficha] of fichas) {
+      // el buscador de fichas tambien filtra este aviso
+      if (!fichaCoincide(dni, ficha, buscado)) continue;
       const e = estadoDrive(dni, ficha);
       if (!e) continue;
       // por persona: quien es arriba y debajo dos mitades independientes,
@@ -870,7 +877,8 @@ export function montarRenovacion() {
    * animaciones y podia comerse un clic en DESCARGAR ZIP).
    */
   function pintarEstadoDrive() {
-    if (!el.estadoDrive) return;
+    // con la pestana del navegador en segundo plano nadie lo ve: se pinta al volver
+    if (!el.estadoDrive || document.hidden) return;
     const html = htmlEstadoDrive();
     if (html === ultimoEstadoDrive) return;
     const sinEta = (h) => h.replace(ETA_ED, "<span data-ed-eta></span>");
@@ -1459,6 +1467,47 @@ export function montarRenovacion() {
     caja.setAttribute("aria-label", `${src ? "Reemplazar" : "Agregar"} la foto de la persona`);
   }
 
+  /* ---------------- buscador de fichas ---------------- */
+
+  /** Lo escrito en el buscador, sin tildes ni espacios de mas. */
+  function textoBuscado() {
+    return sinTildesAuto(el.buscar?.value || "").replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * Una ficha coincide si su DNI contiene los digitos escritos o si su nombre
+   * (apellidos y nombres, en cualquier orden) contiene todas las palabras.
+   */
+  function fichaCoincide(dni, datos, buscado) {
+    if (!buscado) return true;
+    const digitos = buscado.replace(/\D/g, "");
+    if (digitos && digitos === buscado.replace(/\s/g, "") && String(dni).includes(digitos)) return true;
+    const p = datos?.persona ? personaVisible(datos) : null;
+    const nombre = sinTildesAuto(`${dni} ${p?.nombreCompleto || ""} ${p?.apellidos || ""} ${p?.nombres || ""}`);
+    return buscado.split(" ").every((palabra) => nombre.includes(palabra));
+  }
+
+  /** Oculta las fichas que no coinciden con el buscador y cuenta las que quedan. */
+  function filtrarFichas() {
+    const buscado = textoBuscado();
+    let visibles = 0;
+    for (const card of el.resultados.querySelectorAll(":scope > [data-dni]")) {
+      const dni = card.dataset.dni;
+      const ve = fichaCoincide(dni, fichas.get(dni), buscado);
+      card.hidden = !ve;
+      if (ve) visibles++;
+    }
+    if (el.buscarN) el.buscarN.textContent = buscado ? `${visibles}/${fichas.size}` : "";
+    pintarEstadoDrive(); // al toque, sin esperar la vuelta de 400 ms
+  }
+
+  el.buscar?.addEventListener("input", filtrarFichas);
+  el.buscar?.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    el.buscar.value = "";
+    filtrarFichas();
+  });
+
   function pintarFicha(dni, datos) {
     if (!datos.seleccion) datos.seleccion = new Set();
     fichas.set(dni, datos);
@@ -1471,6 +1520,9 @@ export function montarRenovacion() {
       card.dataset.dni = dni;
       el.resultados.appendChild(card);
     }
+    // una ficha nueva (o que cambio de nombre) respeta lo que dice el buscador
+    card.hidden = !fichaCoincide(dni, datos, textoBuscado());
+    if (el.buscarN && textoBuscado()) filtrarFichas();
 
     const { detalle = [], alertas = [], salida = null, error = null, inventario = [] } = datos;
     if (error) {
@@ -1528,10 +1580,20 @@ export function montarRenovacion() {
           opciones.map((t) => `<option value="${escaparHtml(t)}"${t === tipo ? " selected" : ""}>${escaparHtml(t) || "—"}</option>`).join("") +
           `</select>`;
 
+        // el ultimo intento del curso salio jalado: "X" grande sobre la tarjeta
+        // (no tapa los controles: deja pasar los clics)
+        const jalado = !datos.cargando && d?.jalado;
+        const marcaJalado = jalado
+          ? `<span class="rc-jalado-x" aria-hidden="true"></span>` +
+            `<span class="rc-jalado-tag" title="Curso jalado en ${escaparHtml(jalado.origen)}${jalado.nota ? ` (nota ${escaparHtml(jalado.nota)})` : ""}: ${escaparHtml(jalado.curso)}">` +
+            `JALADO${jalado.fecha ? ` ${aFormatoCorto(jalado.fecha)}` : ""} · ${escaparHtml(jalado.origen)}</span>`
+          : "";
+
         return {
           grupo: grupoDe(tipo),
           html:
-            `<div class="rc ${CLASE_ESTADO[estado] || "rc-noaplica"}${nuevo ? " rc-nuevo" : ""}${!cert && !datos.cargando ? " rc-sin-cert" : ""}${Object.keys(edit).length ? " rc-editado" : ""}${fechaDiferente ? " rc-fecha-diferente" : ""}" data-codigo="${r.codigo}" data-orden="${orden}">` +
+            `<div class="rc ${CLASE_ESTADO[estado] || "rc-noaplica"}${nuevo ? " rc-nuevo" : ""}${!cert && !datos.cargando ? " rc-sin-cert" : ""}${Object.keys(edit).length ? " rc-editado" : ""}${fechaDiferente ? " rc-fecha-diferente" : ""}${jalado ? " rc-jalado" : ""}" data-codigo="${r.codigo}" data-orden="${orden}">` +
+            marcaJalado +
             `<div class="rc-top">` +
             `<label class="rc-sel" title="Seleccionar para aplicar C"${elegibleParaC(datos, r.codigo, tipo) ? "" : " hidden"}>` +
             `<input type="checkbox" data-sel="${r.codigo}" aria-label="Seleccionar ${escaparHtml(r.rotulo)} para aplicar C"${datos.seleccion?.has(r.codigo) ? " checked" : ""} /></label>` +
@@ -1572,13 +1634,14 @@ export function montarRenovacion() {
         : items.length
         ? items.map((it, i) => {
             const indice = inventario.indexOf(it);
-            const estado = it.descargable ? "ABRIR PDF" : "SIN CERTIFICADO";
+            const jalado = esJalado(it);
+            const estado = jalado ? `JALADO${it.nota && it.nota !== "0" ? ` (${escaparHtml(it.nota)})` : ""}` : it.descargable ? "ABRIR PDF" : "SIN CERTIFICADO";
             const fecha = aFormatoCorto(it.fecha) || (origen === "INDUCCION" ? "" : "sin fecha");
             const clave = claveCertificado(it);
             const fuera = excluidos.get(dni)?.has(clave);
             const tituloX = fuera ? "Volver a incluir este certificado" : "Quitar este certificado de la carpeta y del ZIP";
             // la "x" va aparte del boton que abre el PDF: un <button> no puede ir dentro de otro
-            return `<div class="cert-fila${fuera ? " excluido" : ""}" data-cert-clave="${escaparHtml(clave)}">` +
+            return `<div class="cert-fila${fuera ? " excluido" : ""}${jalado ? " cert-jalado" : ""}" data-cert-clave="${escaparHtml(clave)}">` +
               `<button class="cert-item${it.descargable ? "" : " disabled"}" data-cert="${indice}" ${it.descargable ? "" : "disabled"} title="${escaparHtml(it.archivo || it.curso || "")}">` +
               `<b>${escaparHtml(it.curso || "Certificado")}</b><span>${fecha ? `<time class="cert-dia">${fecha}</time> · ` : ""}${estado}</span></button>` +
               `<button type="button" class="cert-x" data-cert-x="${indice}" title="${tituloX}" aria-label="${tituloX}">${fuera ? "↺" : "×"}</button></div>`;

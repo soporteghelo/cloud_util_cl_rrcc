@@ -9,6 +9,7 @@
 import { jomiserBuscar, normalizarDni } from "./_lib/nexa.js";
 import { induccionBuscar, driveBuscarRespaldo, sinRespaldoInnecesario } from "./_lib/drive.js";
 import { einBuscarConSesion } from "./_lib/ein.js";
+import { esJalado } from "../shared/estados.js";
 
 /**
  * EIN es opcional: sin EIN_USUARIO/EIN_PASSWORD la fuente queda desactivada
@@ -40,8 +41,12 @@ async function buscarEin(dni) {
     empresa: reg.cod,
     curso: reg.curso,
     fecha: reg.inicio,
-    estado: "PENDIENTE",
-    descargable: true,
+    // APROBADO, DESAPROBADO (jalado) o NSP: un jalado no da capacitacion
+    // ni tiene certificado emitido, no se intenta bajar
+    condicion: reg.condicion,
+    nota: reg.promedio,
+    estado: esJalado(reg) ? "JALADO" : "PENDIENTE",
+    descargable: !esJalado(reg),
     origen: "EIN",
     datosDescarga: { dni, indice: reg.indice, cod: reg.cod, cookie: r.cookie, empresa: r.empresa },
   }));
