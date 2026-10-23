@@ -29,6 +29,17 @@ const FUENTE = '"Arial Narrow", "Liberation Sans Narrow", Arial, Helvetica, sans
 /** Las dos filas en blanco que el fotocheck original deja al final. */
 const FILAS_RRCC = 8;
 
+/**
+ * Las dos caras (anverso azul y reverso con la grilla) miden lo mismo de
+ * ancho: antes eran 656 y 700 px y en el Word no cuadraban. Margen igual a
+ * los dos lados y un hueco entre caras, sin cambiar el lienzo de 1400 x 920.
+ */
+const MARGEN = 10;
+const HUECO_CARAS = 20;
+const ANCHO_CARA = (BASE_W - 2 * MARGEN - HUECO_CARAS) / 2; // 680
+const X_ANVERSO = MARGEN;
+const X_REVERSO = MARGEN + ANCHO_CARA + HUECO_CARAS;
+
 /* ------------------------------------------------------------------ */
 /* Utilidades de dibujo                                                */
 /* ------------------------------------------------------------------ */
@@ -202,9 +213,9 @@ function dibujarCubriendo(ctx, img, x, y, w, h) {
 /* ------------------------------------------------------------------ */
 
 function panelIzquierdo(ctx, p, foto, logo, editables) {
-  const X = 12;
+  const X = X_ANVERSO;
   const Y = 6;
-  const W = 656;
+  const W = ANCHO_CARA;
   const H = 906;
 
   caja(ctx, X, Y, W, H, { relleno: AZUL, borde: BORDE, grosor: 3 });
@@ -218,10 +229,10 @@ function panelIzquierdo(ctx, p, foto, logo, editables) {
   }
 
   /* Foto: marco blanco y recorte centrado. */
-  const fx = 196;
+  const fw = FOTO.ancho;
+  const fh = FOTO.alto;
+  const fx = X + (W - fw) / 2;
   const fy = 138;
-  const fw = 256;
-  const fh = 288;
   caja(ctx, fx - 4, fy - 4, fw + 8, fh + 8, { relleno: "#FFFFFF" });
   if (foto) {
     dibujarCubriendo(ctx, foto, fx, fy, fw, fh);
@@ -274,8 +285,8 @@ function panelIzquierdo(ctx, p, foto, logo, editables) {
 /* ------------------------------------------------------------------ */
 
 function panelDerecho(ctx, p, editables) {
-  const X = 690;
-  const W = 700;
+  const X = X_REVERSO;
+  const W = ANCHO_CARA;
   const columnas = 3;
   const hueco = 16;
   const anchoCol = (W - hueco * (columnas - 1)) / columnas;
@@ -341,7 +352,8 @@ function panelDerecho(ctx, p, editables) {
   /* Leyenda */
   const ly = yMarca + 18;
   const lh = BASE_H - ly - 12;
-  caja(ctx, X + 26, ly, W - 26, lh, { relleno: "#FFFFFF", borde: BORDE, grosor: 2.5 });
+  // a todo el ancho de la cara, alineada con la grilla de arriba
+  caja(ctx, X, ly, W, lh, { relleno: "#FFFFFF", borde: BORDE, grosor: 2.5 });
 
   const lineas = [
     ["IMPORTANTE:", "Lleve Usted esta autorizacion siempre"],
@@ -354,7 +366,7 @@ function panelDerecho(ctx, p, editables) {
   ];
   let ty = ly + 26;
   for (const [fuerte, resto] of lineas) {
-    let x = X + 38;
+    let x = X + 14;
     if (fuerte) {
       texto(ctx, fuerte, x, ty, { tam: 22, negrita: true });
       ctx.font = `bold 22px ${FUENTE}`;
