@@ -9,11 +9,12 @@
  * estados desde los certificados.
  */
 
-import { $, crearConsola, crearProgreso, notificar } from "./comun.js";
+import JSZip from "jszip";
+import { $, crearConsola, crearProgreso, notificar, descargarBlob } from "./comun.js";
 import { normalizarDni } from "../lib/dni.js";
 import { aFormatoCorto } from "../../shared/estados.js";
 import { obtenerContexto, obtenerPersona } from "../lib/datos.js";
-import { altaPersona, generarSalidas, subirFoto } from "../lib/renovacion.js";
+import { altaPersona, generarSalidas, subirFoto, GUARDAR_EN_DRIVE } from "../lib/renovacion.js";
 import { tiposDeMatriz, cargoMasParecido, cargosDeMatriz, tipoObligado, SIEMPRE_A } from "../../shared/estados.js";
 import { RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
@@ -56,6 +57,17 @@ export function montarNuevo() {
     { tipo: "", clase: "sin", titulo: "SIN TIPO" },
   ];
   const grupoDeTipo = (v) => (v === "A" || v === "C" ? v : "");
+
+  /** El ZIP de la persona recien dada de alta: sus certificados + el Word con el fotocheck. */
+  async function descargarZipAlta(salida) {
+    const nombre = String(salida.nombre || "alta").replace(/[\\/:*?"<>|]+/g, " ").trim() || "alta";
+    const zip = new JSZip();
+    const root = zip.folder(nombre) || zip;
+    if (salida.blobs?.word) root.file(salida.nombreWord || "Autorizacion_RRCC.docx", salida.blobs.word);
+    for (const a of salida.archivos || []) root.file(a.nombre, a.datos);
+    // PDF y .docx ya vienen comprimidos por dentro: DEFLATE no baja el tamano
+    descargarBlob(await zip.generateAsync({ type: "blob", compression: "STORE" }), `${nombre}.zip`);
+  }
 
   function pintarMatriz(tipos = {}) {
     const tarjetas = RRCC.map((r, orden) => {
@@ -393,11 +405,16 @@ export function montarNuevo() {
       barra.set(4, 5, "generando salidas");
       const salida = await generarSalidas(r, contexto, { log: consola });
 
+      // sin Drive la documentacion sale como ZIP, igual que en la renovacion
+      if (!GUARDAR_EN_DRIVE) await descargarZipAlta(salida);
+
       barra.set(5, 5, "completado");
       consola.cabecera(`ALTA COMPLETA · ${r.despues.codigo || ""} ${r.despues.nombreCompleto}`);
       notificar(
         "Personal dado de alta",
-        `${r.despues.nombreCompleto} · carpeta "${salida.nombre}" con ${salida.certificados.length} certificado(s).`
+        GUARDAR_EN_DRIVE
+          ? `${r.despues.nombreCompleto} · carpeta "${salida.nombre}" con ${salida.certificados.length} certificado(s).`
+          : `${r.despues.nombreCompleto} · ZIP "${salida.nombre}" con ${salida.archivos.length} certificado(s) + Word.`
       );
     } catch (e) {
       consola(`no se pudo completar el alta: ${e.message}`, "err");

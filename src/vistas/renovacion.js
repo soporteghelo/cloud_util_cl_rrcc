@@ -35,7 +35,7 @@ import {
 } from "../lib/renovacion.js";
 import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
-import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, certificadosDeRrcc, MIME_DOCX } from "../lib/renovacion.js";
+import { cargarContexto, renovarPersona, consultarPersona, adelantarInventarios, generarSalidas, vaciarCarpeta, resumenAutorizaciones, fotoDeDni, fotoAntigua, subirFoto, guardarFilaVerificada, subirArchivos, descargarCertificado, claveCertificado, nombresEnCarpeta, nombreEnCarpeta, certificadosDeRrcc, MIME_DOCX, GUARDAR_EN_DRIVE } from "../lib/renovacion.js";
 import {
   aFormatoCorto,
   aIso,
@@ -757,6 +757,14 @@ export function montarRenovacion() {
    */
   function estadoDrive(dni, ficha) {
     if (!ficha?.persona || ficha.consulta) return null;
+    // sin Drive solo queda el ZIP: `local` = armado en el navegador, nada que subir
+    if (!GUARDAR_EN_DRIVE) {
+      const zip = estadoZip(ficha);
+      if (zip) return { tipo: zip.listo ? "local" : "guardando", zip };
+      if (ficha.errorSalida) return { tipo: "error", texto: ficha.errorSalida, zip: null };
+      if (salidasPendientes.has(dni)) return { tipo: "guardando", texto: "leyendo certificados…", zip: null };
+      return null;
+    }
     const barra = ficha.progreso?.salida;
     if (barra) {
       const pct = barra.total ? Math.min(100, Math.round((barra.hecho / barra.total) * 100)) : 0;
@@ -861,7 +869,9 @@ export function montarRenovacion() {
         `<div class="ed-par" role="status">` +
           `<div class="ed-quien"><span class="ed-dni">${escaparHtml(dni)}</span>` +
           `<span class="ed-nombre">${escaparHtml(ficha.persona.nombreCompleto || "")}</span></div>` +
-          `<div class="ed-mitades">${htmlMitadZip(dni, e)}${htmlMitadDrive(e)}</div>` +
+          (GUARDAR_EN_DRIVE
+            ? `<div class="ed-mitades">${htmlMitadZip(dni, e)}${htmlMitadDrive(e)}</div>`
+            : `<div class="ed-mitades ed-solo">${htmlMitadZip(dni, e)}</div>`) +
           `</div>`
       );
     }
@@ -925,6 +935,7 @@ export function montarRenovacion() {
   function mostrarProgreso(dni, clave, estado) {
     const ficha = fichas.get(dni);
     if (!ficha) return;
+    if (clave === "salida" && !GUARDAR_EN_DRIVE) return; // no hay subida a Drive que mostrar
     const progreso = (ficha.progreso ||= {});
     if (!estado) delete progreso[clave];
     else {
@@ -1660,7 +1671,9 @@ export function montarRenovacion() {
       ? `<a class="btn btn-ghost btn-sm" href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener" data-carpeta-abrir="${dni}">ABRIR CARPETA</a>` +
         `<button type="button" class="btn btn-ghost btn-sm" data-carpeta-zip="${dni}">DESCARGAR CARPETA</button>` +
         `<a class="btn btn-ghost btn-sm" href="https://wa.me/?text=${mensajeWhatsapp}" target="_blank" rel="noopener" data-carpeta-whatsapp="${dni}" title="Antes de abrir WhatsApp, actualiza el fotocheck y el Word de la carpeta con lo que se ve ahora en la ficha. El mensaje lleva el link de la carpeta, el DNI y el nombre: solo falta elegir el contacto y enviar">ENVIAR POR WHATSAPP</a>`
-      : "";
+      : (datos?.salida || salida)?.archivos?.length
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-carpeta-zip="${dni}">DESCARGAR ZIP</button>`
+        : "";
 
     /* Lo que importa de un vistazo: de las "A" que la persona tiene, cuantas
        siguen respaldadas por un certificado vigente en las tres fuentes. */
@@ -2626,7 +2639,7 @@ export function montarRenovacion() {
       soltarFondo();
       if (varias && !senal.aborted) sinFoto.forEach(fotoTardia);
       if (porArmar.length && !senal.aborted) {
-        if (varias) consola.cabecera(`CARPETAS DE DRIVE · ${porArmar.length} persona(s)`);
+        if (varias) consola.cabecera(`${GUARDAR_EN_DRIVE ? "CARPETAS DE DRIVE" : "ZIP"} · ${porArmar.length} persona(s)`);
         // Una carpeta a la vez, pero la persona siguiente empieza a bajar sus
         // certificados (no pasan por Apps Script) apenas la anterior termino
         // de bajar los suyos, mientras esa sube a Drive.
@@ -3216,7 +3229,7 @@ export function montarRenovacion() {
     r.estado = estado;
     r.avisos = avisos.filter(Boolean).join(" | ");
     r.guardadoHoja = e.hojaOk ? "SI" : estado === "CONSULTADO" ? "" : "NO";
-    r.drive = e.driveOk ? "OK" : estado === "CONSULTADO" ? "" : "NO";
+    r.drive = !GUARDAR_EN_DRIVE ? "" : e.driveOk ? "OK" : estado === "CONSULTADO" ? "" : "NO";
     logAuto(`=> ${estado}`, estado.startsWith("OK") || estado === "CONSULTADO" ? "ok" : "err", e.dni);
   }
 
@@ -3335,6 +3348,7 @@ export function montarRenovacion() {
           }
 
           // 4. Drive: cuando la corrida termino y su carpeta quedo GUARDADA
+          if (!corriendo && e.zipOk && !e.driveOk && !GUARDAR_EN_DRIVE) e.driveOk = true; // nada que confirmar
           if (!corriendo && e.zipOk && !e.driveOk) {
             if (s.drive === "error") {
               e.fallo = "Drive no se pudo guardar";
@@ -3474,7 +3488,7 @@ export function montarRenovacion() {
             ? { estado: "ZIP OK, HOJA/DRIVE SIN CONFIRMAR", avisos: [...e.avisos, "detenido antes de confirmar la hoja y Drive"].join(" | ") }
             : { estado: "NO PROCESADO", avisos: [...e.avisos, "detenido antes de terminar"].join(" | ") });
           r.guardadoHoja = e.hojaOk ? "SI" : "NO";
-          r.drive = e.driveOk ? "OK" : "NO";
+          r.drive = !GUARDAR_EN_DRIVE ? "" : e.driveOk ? "OK" : "NO";
         }
         return r;
       });

@@ -34,6 +34,15 @@ import { armarAutorizacion, medidasWord, medirImagen } from "./docx.js";
 
 export const MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
+/**
+ * La renovacion ya no sube su documentacion (certificados, fotocheck, Word) a
+ * la carpeta de Drive de la persona: queda solo el ZIP armado en el navegador.
+ * Cada PDF volvia a cruzar /api/drive-output en base64 (1.33x su tamano) y eso
+ * era la mayor parte del Fast Origin Transfer de Vercel. Con `true` vuelve el
+ * flujo anterior completo (carpeta, subidas, limpieza y resubida al editar).
+ */
+export const GUARDAR_EN_DRIVE = false;
+
 /* ------------------------------------------------------------------ */
 /* Contexto (se carga una vez por corrida)                             */
 /* ------------------------------------------------------------------ */
@@ -760,12 +769,17 @@ export async function generarSalidas(
     return p;
   };
   // la vaciada al identificar a la persona sirve solo si es la misma carpeta
-  // (si se corrigio el nombre en el camino, la carpeta es otra)
-  const carpetaP = carpeta && carpeta.nombre === nombre ? carpeta.promesa.catch(crear) : crear();
+  // (si se corrigio el nombre en el camino, la carpeta es otra). Sin Drive no
+  // hay carpeta: `vaciada` evita la limpieza del final.
+  const carpetaP = !GUARDAR_EN_DRIVE
+    ? Promise.resolve({ carpetaId: null, vaciada: true })
+    : carpeta && carpeta.nombre === nombre
+      ? carpeta.promesa.catch(crear)
+      : crear();
   // la primera tanda sale cuando todo lo de la carpeta ya esta en memoria
   let soltarSubidas = () => {};
   const juntarP = new Promise((listo) => (soltarSubidas = listo));
-  const subir = colaDeSubida(carpetaP, senal, { juntarP, fondo });
+  const subir = GUARDAR_EN_DRIVE ? colaDeSubida(carpetaP, senal, { juntarP, fondo }) : null;
 
   const salida = { carpetaId: null, nombre, certificados: [], fotocheck: null, word: null, fallos: [], archivos: [] };
 
@@ -782,10 +796,12 @@ export async function generarSalidas(
   let totalZip = 0;
   let hechoZip = 0;
   const pasoZip = (que) => avanceZip(Math.min(++hechoZip, totalZip), totalZip, que);
-  carpetaP.then(
-    () => paso("carpeta lista"),
-    () => {}
-  );
+  if (GUARDAR_EN_DRIVE) {
+    carpetaP.then(
+      () => paso("carpeta lista"),
+      () => {}
+    );
+  }
 
   /* --- foto y fotocheck antiguo: los adelantados, o se piden ahora --- */
   const fotoP = Promise.resolve(
@@ -813,19 +829,20 @@ export async function generarSalidas(
   const armadoP = (async () => {
     const foto = await fotoP;
     const img = await fotocheckImagen(persona, { foto, conWord: true });
-    const imgBase64 = await blobABase64(img.blob);
-    const kb = (img.blob.size / 1024).toFixed(0);
     pasoZip("fotocheck listo");
-    fotocheckSubido = subir({
-      nombre: nombreFoto,
-      mime: img.mime,
-      datos: imgBase64,
-    }).then((r) => {
-      log(`fotocheck subido a Drive (${img.ancho}x${img.alto} px, ${kb} KB)`, "ok");
-      paso("fotocheck subido");
-      return r;
-    });
-    fotocheckSubido.catch(() => {});
+    if (GUARDAR_EN_DRIVE) {
+      const kb = (img.blob.size / 1024).toFixed(0);
+      fotocheckSubido = subir({
+        nombre: nombreFoto,
+        mime: img.mime,
+        datos: await blobABase64(img.blob),
+      }).then((r) => {
+        log(`fotocheck subido a Drive (${img.ancho}x${img.alto} px, ${kb} KB)`, "ok");
+        paso("fotocheck subido");
+        return r;
+      });
+      fotocheckSubido.catch(() => {});
+    }
 
     const antiguo = await antiguoP;
     const docx = await armarAutorizacion({
@@ -838,20 +855,23 @@ export async function generarSalidas(
     // se devuelven las imagenes ya armadas para que la vista pueda abrir la
     // previsualizacion sin volver a pedirlas a Drive
     salida.blobs = { fotocheck: img.blob, word: docx };
+    salida.nombreWord = nombreWord;
     salida.foto = foto;
     salida.antiguo = antiguo;
 
     // se encola aca y no despues: asi entra en la misma tanda que el resto
-    wordSubido = subir({
-      nombre: nombreWord,
-      mime: MIME_DOCX,
-      datos: await blobABase64(docx),
-    }).then((r) => {
-      log(`Word de autorizacion subido a Drive`, "ok");
-      paso("Word subido");
-      return r;
-    });
-    wordSubido.catch(() => {});
+    if (GUARDAR_EN_DRIVE) {
+      wordSubido = subir({
+        nombre: nombreWord,
+        mime: MIME_DOCX,
+        datos: await blobABase64(docx),
+      }).then((r) => {
+        log(`Word de autorizacion subido a Drive`, "ok");
+        paso("Word subido");
+        return r;
+      });
+      wordSubido.catch(() => {});
+    }
     return docx;
   })();
   armadoP.catch(() => {});
@@ -865,7 +885,7 @@ export async function generarSalidas(
   total = 1 + tareas.length + 2; // DRIVE: carpeta + cada certificado + fotocheck + Word
   totalZip = tareas.length + 2; // ZIP: cada certificado + fotocheck + Word
   log(
-    `${vigentes.length} certificado(s) de RRCC "A" en vigor para subir` +
+    `${vigentes.length} certificado(s) de RRCC "A" en vigor para ${GUARDAR_EN_DRIVE ? "subir" : "el ZIP"}` +
       (extra.length ? ` + ${extra.length} de Drive` : "") +
       (deLaterales ? ` + ${deLaterales} de EIN/inducción` : "")
   );
@@ -893,6 +913,10 @@ export async function generarSalidas(
         // queda en memoria: el ZIP de la carpeta se arma con esto en el
         // navegador, sin volver a bajar cada archivo de Drive
         salida.archivos.push({ nombre: t.archivo, datos: r.pdf });
+        if (!GUARDAR_EN_DRIVE) {
+          log(`  · ${t.etiqueta}: ${kb} KB → ZIP`, "ok");
+          return;
+        }
         // no se espera la subida: la descarga siguiente arranca ya
         subidas.push(
           subir({ nombre: t.archivo, mime: "application/pdf", datos: aBase64(r.pdf) }).then(
@@ -922,7 +946,7 @@ export async function generarSalidas(
   // armados el fotocheck y el Word: se avisa YA, sin esperar a Drive.
   const zipP = Promise.all([descargasP, armadoP]).then(() => {
     if (senal?.aborted) return;
-    log(`ZIP listo: ${salida.archivos.length} certificado(s) + Word · Drive sigue subiendo`, "ok");
+    log(`ZIP listo: ${salida.archivos.length} certificado(s) + Word${GUARDAR_EN_DRIVE ? " · Drive sigue subiendo" : ""}`, "ok");
     try {
       alZipListo?.(salida);
     } catch {
@@ -969,6 +993,7 @@ function textoCarpeta(c) {
 }
 
 export function vaciarCarpeta(persona, ctx, { log = () => {}, senal, fondo = false } = {}) {
+  if (!GUARDAR_EN_DRIVE) return null;
   const nombre = nombreCarpeta(persona, ctx.config);
   const promesa = (async () => {
     log(`carpeta de Drive "${nombre}"...`);

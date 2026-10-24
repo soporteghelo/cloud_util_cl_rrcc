@@ -2730,6 +2730,7 @@ button.card-foto:disabled::after { display: none; }
 .ed-par { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
 .ed-par .ed-quien { margin-top: 0; padding: 0 2px; }
 .ed-mitades { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ed-mitades.ed-solo { grid-template-columns: 1fr; }
 .ed-mitad { flex-direction: column; align-items: stretch; gap: 6px; padding: 9px 10px; min-width: 0; }
 .ed-espera { --ed-c: var(--tx-mute); }
 .ed-cabeza { display: flex; align-items: center; gap: 9px; min-width: 0; }
