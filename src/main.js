@@ -30,6 +30,7 @@ import { montarEstadoTotal } from "./vistas/estado-total.js";
 import { montarExportacion } from "./vistas/exportacion.js";
 import { montarManual } from "./vistas/manual.js";
 import { montarVerRrcc } from "./vistas/ver-rrcc.js";
+import { montarVerificacion } from "./vistas/verificacion.js";
 import { montarModalFotocheck } from "./vistas/fotocheck-modal.js";
 import { abrirVisorPdf } from "./vistas/visor-pdf.js";
 
@@ -751,6 +752,7 @@ el.carpeta.addEventListener("click", async () => {
       ["tab-certificados", "vista-certificados"],
       ["tab-renovacion", "vista-renovacion"],
       ["tab-nuevo", "vista-nuevo"],
+      ["tab-verificacion", "vista-verificacion"],
       ["tab-estado", "vista-estado"],
       ["tab-estado-total", "vista-estado-total"],
       ["tab-exportacion", "vista-exportacion"],
@@ -771,6 +773,7 @@ el.carpeta.addEventListener("click", async () => {
   montarExportacion();
   montarManual();
   montarVerRrcc();
+  montarVerificacion();
 
   // Con las vistas ya montadas se empieza a traer la base: el contexto primero
   // y el listado de personal despues, por el carril de fondo. Asi, para cuando

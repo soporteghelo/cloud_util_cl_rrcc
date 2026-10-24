@@ -2833,3 +2833,33 @@ button.card-foto:disabled::after { display: none; }
 .rn-auto-carpeta b { color: var(--tx); font-weight: 600; }
 .rn-auto-carpeta .lnk { margin-left: 4px; font-size: 10px; }
 .ln-auto { opacity: 0.92; }
+
+/* ---------------- VERIFICACION ---------------- */
+.vf-filtros { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.vf-filtros:empty { display: none; }
+.vf-filtros .btn[aria-pressed="true"] { border-color: var(--cy); color: var(--cy); background: rgba(34, 211, 238, 0.1); }
+.vf-tabla .vf-check { width: 28px; text-align: center; }
+.vf-tabla .vf-nueva { color: var(--gr); }
+.vf-tabla .vf-motivo { font-size: 10px; opacity: 0.7; white-space: normal; margin-top: 3px; max-width: 260px; }
+.vf-tabla tr.vf-hecho { opacity: 0.6; }
+#vf-aplicar { width: 100%; margin-top: 9px; }
+.vf-tabla .vf-jalado { color: var(--rd); }
+/* como EXPORTACION: solo la tabla desplaza, con el encabezado fijo */
+.ex-body #vf-resultados { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.vf-filtros { flex: 0 0 auto; }
+.vf-tabla thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.panel-go #vf-stop { width: 100%; margin-top: 9px; }
+.panel-go #vf-stop[hidden] { display: none; }
+@media (min-width: 901px) {
+  #vista-verificacion .panel-res { flex: 1 1 75%; }
+  #vista-verificacion .panel-term { flex: 1 1 25%; min-height: 92px; }
+}
+@media (max-width: 900px) {
+  .ex-body #vf-resultados { overflow: visible; }
+}

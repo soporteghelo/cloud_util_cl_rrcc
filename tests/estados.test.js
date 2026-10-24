@@ -42,6 +42,7 @@ import {
   tipoObligado,
   esJalado,
   jaladoVigente,
+  verificarRiesgo,
 } from "../shared/estados.js";
 import { CABECERA, INDICE, CODIGOS_RRCC, colCap, colVenc, colTipo, colEstado } from "../shared/rrcc.js";
 
@@ -890,4 +891,55 @@ test("elegirCertificados: un jalado no da capacitacion y marca la tarjeta si es 
   assert.ok(jaladoVigente(r.jalados.get("TA"), r.porRrcc.get("TA")), "ultimo intento jalado: se marca");
   assert.equal(jaladoVigente(r.jalados.get("CS"), r.porRrcc.get("CS")), null, "aprobo despues: no se marca");
   assert.ok(jaladoVigente({ fecha: "2026-01-01" }, null), "sin certificado: se marca");
+});
+
+/* ------------------------------------------------------------------ */
+/* Verificacion de un riesgo                                           */
+/* ------------------------------------------------------------------ */
+
+test("verificarRiesgo cambia solo las columnas del riesgo elegido", () => {
+  const fila = personaDePrueba();
+  const items = [
+    { curso: "AISLAMIENTO, BLOQUEO Y ETIQUETADO DE ENERGÍAS", fecha: "2026-09-12", origen: "JOMISER" },
+    { curso: "TRABAJOS EN ALTURA", fecha: "2026-09-12", origen: "JOMISER" },
+  ];
+  const v = verificarRiesgo({ fila, items, codigo: "AE", hoy: HOY, diccionario: dic });
+  assert.equal(v.aplica, true);
+  assert.equal(v.vencPrevio, "");
+  assert.equal(v.fila[colCap("AE")], "2026-09-12");
+  assert.equal(v.fila[colVenc("AE")], "2027-09-12");
+  assert.equal(v.fila[colEstado("AE")], "VIGENTE");
+  // TA tambien tiene certificado nuevo, pero no es el riesgo verificado
+  assert.equal(v.fila[colCap("TA")], "2025-09-10");
+  assert.equal(v.fila[colVenc("TA")], "");
+  assert.equal(v.fila[INDICE["FECHA MINIMA"]], "2027-09-12");
+});
+
+test("verificarRiesgo no aplica si el certificado no cambia la vigencia", () => {
+  const fila = filaVacia();
+  fila[colTipo("TA")] = "A";
+  fila[colCap("TA")] = "2026-08-13"; // sigue vigente
+  fila[colVenc("TA")] = "2027-08-13";
+  const items = [{ curso: "TRABAJOS EN ALTURA", fecha: "2026-09-01", origen: "JOMISER" }];
+  assert.equal(verificarRiesgo({ fila, items, codigo: "TA", hoy: HOY, diccionario: dic }).aplica, false);
+  assert.equal(verificarRiesgo({ fila, items: [], codigo: "TA", hoy: HOY, diccionario: dic }).aplica, false);
+});
+
+test("verificarRiesgo: un curso 'Desaprobado' de JOMISER no da vigencia", () => {
+  // asi llega la fila de JOMISER con la etiqueta roja en vez del certificado
+  const fila = filaVacia();
+  fila[colTipo("ES")] = "A";
+  fila[colCap("ES")] = "2025-10-01";
+  fila[colVenc("ES")] = "2026-10-01";
+  const items = [
+    { curso: "EXCAVACIONES SUBTERRÁNEAS", fecha: "2026-10-23", estado: "Desaprobado", descargable: false, origen: "JOMISER" },
+    { curso: "PROTECCIÓN DE MÁQUINAS", fecha: "2026-10-23", estado: "DISPONIBLE", descargable: true, origen: "JOMISER" },
+  ];
+  const v = verificarRiesgo({ fila, items, codigo: "ES", hoy: "2026-10-24", diccionario: dic });
+  assert.equal(v.aplica, false);
+  assert.equal(v.certificado, null);
+  assert.equal(v.jalado?.fecha, "2026-10-23");
+  assert.equal(v.fila[colCap("ES")], "2025-10-01", "la fecha de la hoja no se toca");
+  // el curso aprobado del mismo dia si cuenta para su riesgo
+  assert.equal(verificarRiesgo({ fila, items, codigo: "PM", hoy: "2026-10-24", diccionario: dic }).cap, "2026-10-23");
 });

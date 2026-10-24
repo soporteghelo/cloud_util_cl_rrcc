@@ -78,11 +78,15 @@ export default async function handler(req, res) {
       avisos: [],
     };
 
+    // `solo: "JOMISER"` (pestana VERIFICACION): las demas fuentes ni se
+    // consultan, quedan como si no devolvieran nada
+    const soloJomiser = String(body.solo || "").toUpperCase() === "JOMISER";
+    const nada = async () => ({ items: [], avisos: [] });
     const [jomiser, drive, ein, respaldo] = await Promise.allSettled([
       jomiserBuscar(norm.dni),
-      induccionBuscar(norm.dni),
-      buscarEin(norm.dni),
-      driveBuscarRespaldo(norm.dni),
+      soloJomiser ? nada() : induccionBuscar(norm.dni),
+      soloJomiser ? nada() : buscarEin(norm.dni),
+      soloJomiser ? nada() : driveBuscarRespaldo(norm.dni),
     ]);
 
     if (jomiser.status === "fulfilled") {

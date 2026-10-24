@@ -36,6 +36,9 @@
           <button class="tab" id="tab-nuevo" type="button" role="tab" aria-selected="false">
             NUEVO PERSONAL
           </button>
+          <button class="tab" id="tab-verificacion" type="button" role="tab" aria-selected="false">
+            VERIFICACIÓN
+          </button>
           <button class="tab" id="tab-estado" type="button" role="tab" aria-selected="false">
             ESTADO RRCC
           </button>
@@ -403,6 +406,74 @@
       <!-- ============================================================= -->
       <!-- VISTA 4 · ESTADO POR RRCC (vencimientos, para imprimir)        -->
       <!-- ============================================================= -->
+      <!-- ============================================================= -->
+      <!-- VERIFICACION · vigencias de un RRCC contra JOMISER             -->
+      <!-- ============================================================= -->
+      <div class="vista" id="vista-verificacion" hidden>
+        <div class="col col-in">
+          <section class="panel panel-obj">
+            <div class="panel-head">
+              <h2>01 · RIESGO CRÍTICO</h2>
+              <span class="count" id="vf-count"></span>
+            </div>
+            <div class="panel-body panel-body-col">
+              <label class="lbl" for="vf-riesgo">Riesgo crítico a verificar</label>
+              <select class="inp" id="vf-riesgo"></select>
+
+              <div class="avisos">
+                <div class="alert alert-info">
+                  Busca en <b>JOMISER</b> el curso de este riesgo para cada persona <b>ACTIVA</b> que lo tiene como
+                  <b>"A"</b> (autorizado) en la hoja, y calcula la vigencia con las mismas reglas que la renovación.
+                  <b>No escribe nada</b> hasta que pulses <b>APLICAR</b>: antes puedes revisar la lista y desmarcar
+                  a quien no quieras actualizar.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-go">
+            <div class="panel-body">
+              <button class="btn btn-go" id="vf-verificar" type="button">
+                <span class="go-txt">VERIFICAR CON JOMISER</span>
+                <span class="go-arrow">▸</span>
+              </button>
+              <button class="btn btn-auto" id="vf-aplicar" type="button" disabled>APLICAR</button>
+              <button class="btn btn-stop" id="vf-stop" type="button" hidden>ABORTAR</button>
+              <div class="bar-wrap" id="vf-bar-wrap" hidden>
+                <div class="bar"><div class="bar-fill" id="vf-bar-fill"></div></div>
+                <div class="bar-meta">
+                  <span id="vf-bar-txt">en espera</span>
+                  <span id="vf-bar-pct">0%</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col col-out">
+          <section class="panel panel-res">
+            <div class="panel-head">
+              <h2>02 · VISTA PREVIA</h2>
+              <span class="count" id="vf-res-count"></span>
+            </div>
+            <div class="panel-body ex-body">
+              <div class="vf-filtros" id="vf-filtros" role="group" aria-label="Filtrar por resultado"></div>
+              <div id="vf-resultados"><div class="estado-vacio">elige un riesgo y pulsa VERIFICAR CON JOMISER</div></div>
+            </div>
+          </section>
+
+          <section class="panel panel-term">
+            <div class="panel-head">
+              <h2>03 · CONSOLA</h2>
+              <button class="lnk" id="vf-log-clear" type="button">limpiar</button>
+            </div>
+            <div class="panel-body panel-body-flush">
+              <div class="term" id="vf-term" role="log" aria-live="polite"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
       <div class="vista" id="vista-estado" hidden>
         <div class="col col-in">
           <section class="panel panel-obj">

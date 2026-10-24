@@ -643,6 +643,32 @@ export function renovarFila(opciones) {
 }
 
 /**
+ * Verificacion de UN riesgo critico (pestana VERIFICACION): corre el mismo
+ * motor que la renovacion con los certificados que se le pasen y devuelve la
+ * fila con SOLO las cuatro columnas de ese riesgo recalculadas, mas el cierre
+ * (FECHA MINIMA, DIAS, ESTADO_FINAL...). Los otros riesgos quedan como estan
+ * en la hoja, aunque el motor tambien los hubiera cambiado.
+ *
+ * `aplica`: el motor tomo un certificado nuevo (NUEVO o ACTUALIZADO) y con eso
+ * la vigencia cambia. Si no aplica, no hay nada que escribir.
+ */
+export function verificarRiesgo(opciones) {
+  const { fila, codigo } = opciones;
+  const hoy = opciones.hoy || hoyIso();
+  const r = renovarFila({ ...opciones, hoy });
+  const d = r.detalle.find((x) => x.codigo === codigo);
+  if (!d) throw new Error(`riesgo desconocido: ${codigo}`);
+
+  const nueva = copiarFila(fila);
+  for (const i of [colCap(codigo), colVenc(codigo), colTipo(codigo), colEstado(codigo)]) nueva[i] = r.fila[i];
+  aplicarCierre(nueva, hoy);
+
+  const vencPrevio = aIso(fila?.[colVenc(codigo)]);
+  const aplica = (d.cambio === "NUEVO" || d.cambio === "ACTUALIZADO") && d.venc !== vencPrevio;
+  return { ...d, vencPrevio, aplica, fila: nueva };
+}
+
+/**
  * Riesgos que nunca van como "C": Excavacion Subterranea y Herramientas
  * Manuales son siempre autorizacion ("A"). Un "C" (de la hoja, de la matriz o
  * escrito a mano) se lleva a "A"; sin tipo siguen sin tipo.
