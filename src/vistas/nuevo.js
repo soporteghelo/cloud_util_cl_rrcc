@@ -18,6 +18,7 @@ import { altaPersona, generarSalidas, subirFoto, GUARDAR_EN_DRIVE } from "../lib
 import { tiposDeMatriz, cargoMasParecido, cargosDeMatriz, tipoObligado, SIEMPRE_A } from "../../shared/estados.js";
 import { RRCC } from "../../shared/rrcc.js";
 import { autocompletar } from "./autocompletar.js";
+import { montarCargaCarpeta } from "./carpeta-altas.js";
 
 export function montarNuevo() {
   const consola = crearConsola("nv-term", "nv-log-clear");
@@ -432,4 +433,5 @@ export function montarNuevo() {
 
   pintarMatriz({});
   cargarCatalogos();
+  montarCargaCarpeta({ consola });
 }

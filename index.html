@@ -284,6 +284,15 @@
           <section class="panel panel-obj">
             <div class="panel-head">
               <h2>01 · DATOS DE LA PERSONA</h2>
+              <button
+                class="btn btn-ghost btn-mini nv-carpeta-btn"
+                id="nv-carpeta"
+                type="button"
+                title="Elegir una carpeta con capturas del chat y EMO: la app reconoce a cada persona y la da de alta o completa sus datos"
+              >
+                CARGAR CARPETA
+              </button>
+              <input id="nv-carpeta-input" type="file" webkitdirectory multiple hidden />
             </div>
             <div class="panel-body panel-body-scroll">
               <div class="form">
@@ -1216,6 +1225,22 @@ Instrucciones:
         <div class="modal-foot">
           <button class="btn btn-ghost btn-sm" id="fc-png" type="button">DESCARGAR IMAGEN</button>
           <button class="btn btn-go btn-sm" id="fc-docx" type="button">DESCARGAR WORD</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- NUEVO PERSONAL → CARGAR CARPETA: revision antes de subir -->
+    <div class="modal" id="nv-carpeta-modal" hidden>
+      <div class="modal-caja modal-carpeta">
+        <div class="modal-head">
+          <b>CARGA DESDE CARPETA</b>
+          <span class="count" id="nv-carpeta-count"></span>
+          <button class="modal-x" id="nv-carpeta-cerrar" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <div class="modal-body" id="nv-carpeta-cuerpo"></div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost btn-sm" id="nv-carpeta-cancelar" type="button">CERRAR</button>
+          <button class="btn btn-go btn-sm" id="nv-carpeta-subir" type="button" disabled>SUBIR A LA BASE</button>
         </div>
       </div>
     </div>

@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "jszip": "^3.10.1",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "vite": "^5.4.10"

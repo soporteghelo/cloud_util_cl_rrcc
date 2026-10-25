@@ -12,10 +12,15 @@ App web con tres funciones:
    carpeta por persona con sus certificados vigentes, el fotocheck nuevo y el
    Word de autorización.
 3. **Nuevo personal** — alta desde la app, con la matriz por puesto proponiendo
-   qué riesgos van autorizados.
+   qué riesgos van autorizados. **CARGAR CARPETA** toma una carpeta con
+   capturas del chat (nombre, DNI, cargo, foto) y los PDF del EMO, mezclados:
+   reconoce a cada persona, recorta su foto, lee el EMO (con OCR si es un
+   escaneo) y, tras una revisión, da de alta a quien no está o completa solo
+   las celdas vacías de quien ya está (`src/lib/carpeta-altas.js`).
 
-Vite + funciones serverless en Vercel. **Sin dependencias nuevas**: solo
-`jszip`, que ya estaba.
+Vite + funciones serverless en Vercel. Dependencias: `jszip`, `pdfjs-dist`
+(leer PDF) y `tesseract.js` (OCR de CARGAR CARPETA; baja el motor y el
+idioma español desde jsDelivr la primera vez que se usa).
 
 ---
 
