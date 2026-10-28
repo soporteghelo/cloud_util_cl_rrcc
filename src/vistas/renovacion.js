@@ -32,6 +32,7 @@ import {
   cortaDeIso,
   hoyLocalIso,
   sinTildesAuto,
+  AREA_FOTOCHECK_RENOVACION,
 } from "../lib/renovacion.js";
 import { drive, desdeBase64, blobABase64, retenerFondo } from "../lib/api.js";
 import { obtenerCatalogo, catalogoGuardado } from "../lib/datos.js";
@@ -291,6 +292,12 @@ export function montarRenovacion() {
     return leerFila(fila);
   }
 
+  /** La persona para el fotocheck (vista, Word, ZIP y Drive): el area va
+      AREA_FOTOCHECK_RENOVACION, salvo que se haya corregido en la ficha. La
+      hoja no cambia. */
+  const paraFotocheck = (ficha, persona = personaVisible(ficha)) =>
+    ficha.datosEdit?.area !== undefined ? persona : { ...persona, area: AREA_FOTOCHECK_RENOVACION };
+
   /**
    * USO DE LENTES (columna O): SI o NO. La opcion vacia solo aparece si la
    * hoja no trae ninguno de los dos, para no obligar a elegir; una vez puesto
@@ -363,7 +370,7 @@ export function montarRenovacion() {
     temporizadorFotocheck = setTimeout(() => {
       const ficha = fichas.get(dni);
       if (!ficha?.persona || !fotocheckAbiertoDe(dni)) return;
-      actualizarFotocheck(personaVisible(ficha), opcionesFotocheck(ficha, dni)).catch(() => {});
+      actualizarFotocheck(paraFotocheck(ficha), opcionesFotocheck(ficha, dni)).catch(() => {});
     }, 120);
   }
 
@@ -374,7 +381,7 @@ export function montarRenovacion() {
     }
     const ficha = fichas.get(dni);
     if (!ficha?.persona) return;
-    abrirFotocheck(personaVisible(ficha), opcionesFotocheck(ficha, dni)).catch(() => {});
+    abrirFotocheck(paraFotocheck(ficha), opcionesFotocheck(ficha, dni)).catch(() => {});
     marcarBotonesFotocheck();
   }
 
@@ -1007,7 +1014,7 @@ export function montarRenovacion() {
    * Drive y el ZIP, que asi no tiene que bajarlos de Drive.
    */
   async function documentosActuales(ficha) {
-    const persona = personaVisible(ficha);
+    const persona = paraFotocheck(ficha);
     const foto = ficha.foto || (await fotoDeDni(persona.dni).catch(() => null));
     const img = await fotocheckImagen(persona, { foto, conWord: true });
     const pngBlob = img.blob; // (el nombre quedo de cuando era PNG: es la imagen del fotocheck)
@@ -2533,7 +2540,7 @@ export function montarRenovacion() {
         // mano mientras se leian las demas personas (tambien el tipo A/C, que
         // decide que certificados van).
         const detalle = detalleVisible(ficha, ficha.detalle || r.detalle);
-        const salida = await generarSalidas({ ...r, despues: ficha.persona, detalle }, contexto, {
+        const salida = await generarSalidas({ ...r, despues: paraFotocheck(ficha, ficha.persona), detalle }, contexto, {
           log: logSalida,
           excluidos: excluidosDe(dni),
           senal,
@@ -3091,7 +3098,7 @@ export function montarRenovacion() {
     }
 
     // las "x": se pulsan sobre la ficha ya editada (un "C" no tiene "x")
-    for (const q of planQuitar(leerFichaAuto(dni) || ficha, elegido, candidatos, CRITERIOS_AUTO)) {
+    for (const q of planQuitar(leerFichaAuto(dni) || ficha, elegido, candidatos, CRITERIOS_AUTO, plan.conservar)) {
       if (!consulta) {
         const card = cardDe(dni);
         const boton = q.codigo

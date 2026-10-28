@@ -230,6 +230,31 @@ test("planFechas: Trabajo en Altura en A sigue en A con la vigencia de su certif
   assert.deepEqual(plan.acciones.filter((a) => a.codigo === "TA"), [{ codigo: "TA", venc: "2027-06-01" }]);
 });
 
+test("planFechas: HM/ES en A con su certificado JOMISER mas nuevo que el lateral llevan esa vigencia y no se les pone la x", () => {
+  // el caso real: hoja 09/11/2026 (RIESGOS CRITICOS del 09/11/2025), JOMISER del 24/10/2026
+  const f = ficha();
+  Object.assign(f.riesgos.find((r) => r.codigo === "HM"), { venc: "2026-11-09", certCurso: "curso 24/10/2026 · JOMISER", certVigencia: "24/10/2027" });
+  Object.assign(f.riesgos.find((r) => r.codigo === "ES"), { venc: "2026-11-09", certClave: "JOMISER|es|", certCurso: "curso 23/10/2026 · JOMISER", certVigencia: "23/10/2027" });
+  const candidatos = candidatosLaterales(f);
+  const elegido = { ...candidatos[0], fechaIso: "2025-11-09" };
+  const plan = planFechas(f, elegido);
+  assert.equal(plan.esperadas.HM, "2027-10-24");
+  assert.equal(plan.esperadas.ES, "2027-10-23");
+  assert.deepEqual(plan.conservar, ["HM", "ES"]);
+  // los C de la lista siguen con la fecha del lateral
+  assert.equal(plan.esperadas.CS, "2026-11-09");
+  const quitar = planQuitar(f, elegido, candidatos, CRITERIOS_AUTO, plan.conservar).map((q) => q.clave);
+  assert.ok(!quitar.includes("JOMISER|hm|") && !quitar.includes("JOMISER|es|"));
+  // sin lateral vigente tambien
+  assert.equal(planFechas(f, null).esperadas.HM, "2027-10-24");
+  // su certificado mas viejo que el lateral: manda el lateral (y va la x)
+  const viejo = planFechas(ficha(), { ...elegido, fechaIso: "2026-08-20" });
+  assert.equal(viejo.esperadas.HM, "2027-08-20");
+  assert.deepEqual(viejo.conservar, []);
+  // con el interruptor apagado, como antes: la hoja ya tiene la del lateral
+  assert.ok(!("HM" in planFechas(f, elegido, { ...CRITERIOS_AUTO, hmEsSegunSuCertificado: false }).esperadas));
+});
+
 test("planQuitar: x a HM/ES y del panel lateral solo queda el elegido; una vez por clave", () => {
   const f = ficha();
   const candidatos = candidatosLaterales(f);

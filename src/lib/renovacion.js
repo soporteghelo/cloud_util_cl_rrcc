@@ -86,6 +86,9 @@ export function listarPersonal(senal, filtro) {
  * comienzo y las renombra (ver `carpeta` con `dni`). PLANTILLA_CARPETA ya no
  * se usa.
  */
+/** Area que imprime el fotocheck de la renovacion, salvo que se corrija en la ficha. */
+export const AREA_FOTOCHECK_RENOVACION = "MINA";
+
 export function nombreCarpeta(persona) {
   return normalizarDocumento(persona.dni) || String(persona.dni || "").trim();
 }
@@ -1187,6 +1190,9 @@ export const CRITERIOS_AUTO = Object.freeze({
   rrccConFechaDeInduccion: ["HM", "ES"],
   // HM y ES van siempre como "A": un "C" se cambia a "A"
   hmEsSiempreA: true,
+  // HM y ES en "A" con su propio certificado (JOMISER / DRIVE) mas nuevo que
+  // el lateral: llevan la vigencia de ese certificado y no se les pone la "x"
+  hmEsSegunSuCertificado: true,
   // estos "C" siguen en "C" y llevan la misma vigencia que HM y ES (en "A"
   // siguen en "A" con la vigencia de su certificado)
   cIgualQueHmEs: true,
@@ -1581,15 +1587,29 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
   };
   if (elegido && !Object.keys(tabla).length) avisos.push(`el certificado ${elegido.origen} no trae la tabla de cursos: se usó su fecha general (${cortaDeIso(elegido.fechaIso)})`);
 
-  // HM y ES: fecha de su curso + 365
+  // la vigencia del certificado que muestra la tarjeta, si es de un origen que vale
+  const origenesOk = new Set(criterios.origenesCertificadoA.map((o) => o.toUpperCase()));
+  const deSuCertificado = (r) => {
+    const origen = String(r.certCurso || "").split("·").pop().trim().toUpperCase();
+    return { origen, iso: origenesOk.has(origen) ? isoDeCorta(r.certVigencia) : null };
+  };
+
+  // HM y ES: fecha de su curso + 365, o la de su propio certificado si es mas
+  // nueva (entonces ese certificado se queda en el ZIP: `conservar`)
   let nueva = null;
-  if (elegido && criterios.actualizarHmEs) {
+  const conservar = [];
+  if (criterios.actualizarHmEs) {
     for (const codigo of codigosInd) {
-      const f = fechaCurso(codigo);
-      const venc = sumarDiasIso(f.iso, DIAS_VIGENCIA_AUTO);
+      const f = elegido ? fechaCurso(codigo) : null;
+      const venc = f ? sumarDiasIso(f.iso, DIAS_VIGENCIA_AUTO) : null;
       nueva ||= venc;
       const r = riesgos.get(codigo);
-      if (r && (r.tipo === "A" || r.tipo === "C")) poner(codigo, r, venc, f.porque);
+      if (!r || (r.tipo !== "A" && r.tipo !== "C")) continue;
+      const propio = criterios.hmEsSegunSuCertificado && r.tipo === "A" && !r.sinCert && !r.certExcluido ? deSuCertificado(r) : {};
+      if (propio.iso && (!venc || propio.iso > venc)) {
+        poner(codigo, r, propio.iso, `su certificado ${propio.origen}`);
+        conservar.push(codigo);
+      } else if (venc) poner(codigo, r, venc, f.porque);
     }
   }
 
@@ -1618,7 +1638,6 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
 
   // demas "A": la vigencia del certificado que muestra la tarjeta
   if (criterios.aSegunCertificado) {
-    const origenesOk = new Set(criterios.origenesCertificadoA.map((o) => o.toUpperCase()));
     const siguenA = new Set((criterios.aSinCertificadoSiguenA || []).map((c) => c.toUpperCase()));
     for (const [codigo, r] of riesgos) {
       if (r.tipo !== "A" || codigosInd.includes(codigo)) continue;
@@ -1630,16 +1649,15 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
         } else avisos.push(`${codigo} (A): sin certificado`);
         continue;
       }
-      const origen = String(r.certCurso || "").split("·").pop().trim().toUpperCase();
+      const { origen, iso } = deSuCertificado(r);
       if (!origenesOk.has(origen)) {
         avisos.push(`${codigo} (A): su certificado es de ${origen || "?"}: no se tocó`);
         continue;
       }
-      const vig = isoDeCorta(r.certVigencia);
-      if (vig) poner(codigo, r, vig, origen);
+      if (iso) poner(codigo, r, iso, origen);
     }
   }
-  return { acciones, esperadas, cambios, avisos, nueva };
+  return { acciones, esperadas, cambios, avisos, nueva, conservar };
 }
 
 /**
@@ -1648,8 +1666,10 @@ export function planFechas(ficha, elegido, criterios = CRITERIOS_AUTO) {
  * el mas reciente). Un certificado puede estar en la tarjeta y en el panel
  * (comparten la "x"): va una sola vez por clave. Devuelve [{ clave, texto, codigo? }]
  * (`codigo` = la "x" de esa tarjeta; sin el, la del panel lateral).
+ * `conservar`: HM/ES que llevan la vigencia de su propio certificado (ver
+ * `planFechas`): ese certificado no se quita.
  */
-export function planQuitar(ficha, elegido, candidatos, criterios = CRITERIOS_AUTO) {
+export function planQuitar(ficha, elegido, candidatos, criterios = CRITERIOS_AUTO, conservar = []) {
   let claveElegido = elegido?.clave || null;
   if (!elegido && criterios.soloUnCertificadoLateral) {
     const conFecha = candidatos.filter((c) => c.fechaIso && c.abre !== false).sort((a, b) => b.fechaIso.localeCompare(a.fechaIso));
@@ -1658,6 +1678,7 @@ export function planQuitar(ficha, elegido, candidatos, criterios = CRITERIOS_AUT
   const quitar = new Map();
   if (criterios.xEnHmEs) {
     for (const codigo of criterios.rrccConFechaDeInduccion.map((c) => c.toUpperCase())) {
+      if (conservar.includes(codigo)) continue;
       const r = (ficha.riesgos || []).find((x) => x.codigo === codigo);
       // la "x" de la tarjeta solo existe en un "A"
       if (r?.certClave && r.tipo === "A" && !r.certExcluido && r.certClave !== claveElegido && !quitar.has(r.certClave)) {
