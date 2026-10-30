@@ -11,7 +11,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import JSZip from "jszip";
 
-import { autorizadosPorPersona, hojasDeExportacion, armarZipExportacion, partirEnZips } from "../src/lib/exportacion.js";
+import {
+  autorizadosPorPersona,
+  terminosDeBusqueda,
+  hojasDeExportacion,
+  armarZipExportacion,
+  partirEnZips,
+} from "../src/lib/exportacion.js";
 import { construirDiccionario } from "../shared/estados.js";
 
 const HOY = "2026-10-03";
@@ -74,6 +80,25 @@ test("filtros de RRCC y de texto", () => {
 
   const porNombre = autorizadosPorPersona(PERSONAS, opciones({ texto: "alvarado" }));
   assert.deepEqual(porNombre.map((x) => x.persona.dni), ["07481337"]);
+});
+
+test("busqueda multiple: por coma, lista de DNI pegada y palabras sueltas del nombre", () => {
+  assert.deepEqual(terminosDeBusqueda("zapata, 07481337 ; mina"), ["ZAPATA", "07481337", "MINA"]);
+  assert.deepEqual(terminosDeBusqueda("41353513 07481337\n70000001"), ["41353513", "07481337", "70000001"]);
+
+  const dnis = (texto) => autorizadosPorPersona(PERSONAS, opciones({ texto })).map((x) => x.persona.dni);
+  assert.deepEqual(dnis("zapata, 07481337"), ["07481337", "41353513"]);
+  assert.deepEqual(dnis("41353513 07481337"), ["07481337", "41353513"]);
+  // las palabras de una busqueda no tienen que ir seguidas
+  assert.deepEqual(dnis("zapata ana"), ["41353513"]);
+  assert.deepEqual(dnis("zapata edgar"), []);
+});
+
+test("seleccion: solo los DNI marcados, sin perder los filtros de estado y RRCC", () => {
+  const sel = new Set(["41353513", "70000001"]);
+  assert.deepEqual(autorizadosPorPersona(PERSONAS, opciones({ dnis: sel })).map((x) => x.persona.dni), ["41353513"]);
+  const soloAe = autorizadosPorPersona(PERSONAS, opciones({ dnis: sel, riesgos: new Set(["AE"]) }));
+  assert.deepEqual(soloAe.map((x) => [x.persona.dni, x.rrcc.map((r) => r.codigo)]), [["41353513", ["AE"]]]);
 });
 
 test("Excel: una fila por autorizacion y una por persona", () => {

@@ -2133,7 +2133,17 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 /* las pastillas de los RRCC "A" bajan de linea en vez de ensanchar la tabla */
 .ex-tabla td.ex-rrcc { width: 36%; white-space: normal; }
 .ex-rrcc .et-badge { margin: 1px 4px 1px 0; }
-.ex-tabla td:nth-child(2) { white-space: normal; }
+.ex-tabla td:nth-child(3) { white-space: normal; }
+/* seleccion para exportar: casilla al inicio y fila resaltada */
+.ex-tabla .ex-check { width: 28px; text-align: center; }
+.ex-tabla tbody tr { cursor: pointer; }
+.ex-tabla tbody tr.ex-marcada { background: rgba(34, 211, 238, 0.09); }
+/* raya entre los marcados (fijos arriba) y los resultados de la busqueda */
+.ex-tabla tbody tr.ex-marcada + tr:not(.ex-marcada) td { border-top: 1px solid var(--cy); }
+.ex-sel { color: var(--cy); }
+.ex-sel:empty { display: none; }
+#ex-res-count { margin-left: auto; }
+.ex-ayuda { font-size: 10px; color: var(--tx-mute); margin: 5px 0 4px; line-height: 1.5; }
 .panel-go #ex-stop { width: 100%; margin-top: 9px; }
 .panel-go #ex-stop[hidden] { display: none; }
 

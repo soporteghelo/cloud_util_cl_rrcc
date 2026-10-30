@@ -24,23 +24,50 @@ export const ESTADOS_EXPORTABLES = ["VIGENTE", "ACTUALIZAR"];
 const activo = (p) => String(p?.estadoTrabajador || "").trim().toUpperCase() === "ACTIVO";
 
 /**
+ * Lo escrito en el buscador, partido en busquedas: "LOPEZ, 71481337; MINA"
+ * son tres. Una lista de DNI pegada desde Excel (separados por espacios o
+ * saltos de linea) tambien se parte, uno por DNI.
+ */
+export function terminosDeBusqueda(texto) {
+  return String(texto || "")
+    .toUpperCase()
+    .split(/[,;\n\r\t]+/)
+    .flatMap((t) => (/^[\d\s]+$/.test(t) ? t.split(/\s+/) : [t]))
+    .map((t) => t.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+}
+
+/**
+ * Una persona coincide si cumple alguna de las busquedas; dentro de una, cada
+ * palabra tiene que estar en el nombre, DNI, area o cargo ("CONDORI OSCAR").
+ */
+function coincideCon(terminos) {
+  if (!terminos.length) return () => true;
+  const palabras = terminos.map((t) => t.split(" "));
+  return (p) => {
+    const campos = [p.nombreCompleto, p.dni, p.area, p.cargo].map((v) => String(v || "").toUpperCase());
+    return palabras.some((ps) => ps.every((w) => campos.some((c) => c.includes(w))));
+  };
+}
+
+/**
  * Personas con al menos un RRCC "A" en los estados pedidos, cada una con esos
  * RRCC (en el orden del catalogo), ordenadas por apellidos.
  *
  *   estados   Set con "VIGENTE" y/o "ACTUALIZAR"; vacio = los dos
  *   riesgos   Set de codigos RRCC; vacio = todos
- *   texto     busca en nombre, DNI, area y cargo
+ *   texto     busca en nombre, DNI, area y cargo (varias, ver `terminosDeBusqueda`)
+ *   dnis      Set de DNI: solo esas personas (la seleccion); sin el, todas
  *   umbrales, hoy  como en `personasPorRiesgo`
  *
  * Un "A" VENCIDO o sin fecha nunca entra: no hay autorizacion que respaldar.
  */
-export function autorizadosPorPersona(personas, { estados, riesgos, texto = "", umbrales, hoy } = {}) {
+export function autorizadosPorPersona(personas, { estados, riesgos, texto = "", dnis, umbrales, hoy } = {}) {
   const validos = new Set(
     estados?.size ? [...estados].filter((e) => ESTADOS_EXPORTABLES.includes(e)) : ESTADOS_EXPORTABLES
   );
-  const buscado = String(texto).trim().toUpperCase();
-  const coincide = (p) =>
-    !buscado || [p.nombreCompleto, p.dni, p.area, p.cargo].some((v) => String(v || "").toUpperCase().includes(buscado));
+  const busca = coincideCon(terminosDeBusqueda(texto));
+  const coincide = (p) => (!dnis || dnis.has(p.dni)) && busca(p);
 
   const porPersona = new Map();
   for (const grupo of personasPorRiesgo(personas, { umbrales, hoy })) {
@@ -172,7 +199,7 @@ export function partirEnZips(lista, max = MAX_CERTIFICADOS_POR_ZIP) {
 }
 
 /** Recorre `lista` con hasta `n` trabajos a la vez, sin seguir si se aborta. */
-async function enParalelo(lista, n, fn, senal) {
+export async function enParalelo(lista, n, fn, senal) {
   let i = 0;
   await Promise.all(
     Array.from({ length: Math.min(n, lista.length) }, async () => {

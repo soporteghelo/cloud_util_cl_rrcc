@@ -60,6 +60,9 @@ export function montarExportacion() {
     resCount: $("ex-res-count"),
     resultados: $("ex-resultados"),
     recargar: $("ex-recargar"),
+    sel: $("ex-sel"),
+    soloSel: $("ex-solo-sel"),
+    quitarSel: $("ex-quitar-sel"),
   };
 
   let personas = [];
@@ -67,8 +70,13 @@ export function montarExportacion() {
   let configSnapshot = null; // config del ultimo snapshot, solo hasta que llegue el contexto real
   let cargando = false;
   let lista = []; // lo ultimo pintado: es lo que se exporta
+  let encontrados = []; // la parte de `lista` que trae la busqueda (sin los ya marcados)
   let abortador = null; // mientras se arma el ZIP
   const estadosElegidos = new Set(); // "VIGENTE" y/o "ACTUALIZAR"; vacio = los dos
+  // DNI marcados en la tabla: sobreviven a cambiar la busqueda, asi se juntan
+  // personas de varias busquedas. Con alguno marcado se exporta solo a ellos.
+  const seleccion = new Set();
+  let soloSeleccion = false; // la tabla muestra solo a los marcados
 
   const selRiesgo = crearMultiSelect(
     "ex-riesgo",
@@ -92,8 +100,11 @@ export function montarExportacion() {
     )}">${r.codigo}</span>`;
 
   function filaHtml({ persona, rrcc }) {
+    const marcada = seleccion.has(persona.dni);
     return (
-      `<tr>` +
+      `<tr data-ex-dni="${escaparHtml(persona.dni)}"${marcada ? ' class="ex-marcada"' : ""}>` +
+      `<td class="ex-check"><input type="checkbox" data-ex-dni="${escaparHtml(persona.dni)}"${marcada ? " checked" : ""}` +
+      ` aria-label="Seleccionar a ${escaparHtml(persona.nombreCompleto || persona.dni)}" /></td>` +
       `<td>${escaparHtml(persona.dni)}</td>` +
       `<td>${escaparHtml(persona.nombreCompleto) || "—"}</td>` +
       `<td>${escaparHtml(persona.cargo) || "—"}</td>` +
@@ -104,17 +115,35 @@ export function montarExportacion() {
     );
   }
 
-  function pintar() {
-    lista = autorizadosPorPersona(personas, {
-      estados: estadosElegidos,
-      riesgos: selRiesgo.obtener(),
-      texto: el.buscar.value,
-      umbrales: umbrales(),
-    });
+  const filtros = (extra = {}) => ({
+    estados: estadosElegidos,
+    riesgos: selRiesgo.obtener(),
+    umbrales: umbrales(),
+    ...extra,
+  });
 
-    const vacio = personas.length ? "nadie coincide con el filtro" : "carga el personal para ver a los autorizados";
+  /** Lo que bajan EXCEL y ZIP: los marcados (con los filtros de estado y RRCC) o, sin marcas, la tabla. */
+  const aExportar = () => (seleccion.size ? autorizadosPorPersona(personas, filtros({ dnis: seleccion })) : lista);
+
+  function pintar() {
+    // los marcados quedan fijos arriba aunque no coincidan con la busqueda;
+    // debajo, lo que encuentra la busqueda (sin repetirlos)
+    const marcados = seleccion.size ? autorizadosPorPersona(personas, filtros({ dnis: seleccion })) : [];
+    encontrados = soloSeleccion
+      ? []
+      : autorizadosPorPersona(personas, filtros({ texto: el.buscar.value })).filter((x) => !seleccion.has(x.persona.dni));
+    lista = [...marcados, ...encontrados];
+
+    const todas = lista.length > 0 && lista.every((x) => seleccion.has(x.persona.dni));
+    const vacio = !personas.length
+      ? "carga el personal para ver a los autorizados"
+      : soloSeleccion
+        ? "ningún seleccionado coincide con el filtro"
+        : "nadie coincide con el filtro";
     el.resultados.innerHTML = lista.length
       ? `<table class="estado-tabla ex-tabla"><thead><tr>` +
+        `<th class="ex-check"><input type="checkbox" data-ex-todos${todas ? " checked" : ""} ` +
+        `title="Marcar o desmarcar a todos los de la tabla" aria-label="Marcar a todos los de la tabla" /></th>` +
         `<th>DNI</th><th>Apellidos y nombres</th><th>Cargo</th><th>Área</th><th>Guardia</th><th>RRCC "A"</th>` +
         `</tr></thead><tbody>${lista.map(filaHtml).join("")}</tbody></table>`
       : `<div class="estado-vacio">${vacio}</div>`;
@@ -125,14 +154,36 @@ export function montarExportacion() {
       ? `${lista.length} persona(s) · ${autorizaciones.length} autorización(es)` +
         ` · ${autorizaciones.length - porVencer} vigente(s) · ${porVencer} por vencer`
       : "";
+    pintarSeleccion();
+  }
+
+  function pintarSeleccion() {
+    el.sel.textContent = seleccion.size ? `${seleccion.size} seleccionada(s)` : "";
+    el.soloSel.hidden = !seleccion.size && !soloSeleccion;
+    el.soloSel.setAttribute("aria-pressed", String(soloSeleccion));
+    el.soloSel.textContent = soloSeleccion ? "ver todos" : "ver seleccionados";
+    el.quitarSel.hidden = !seleccion.size;
+    const n = seleccion.size ? ` (${seleccion.size})` : "";
+    el.excel.textContent = `EXCEL${n}`;
+    el.zip.textContent = `DESCARGAR ZIP${n}`;
     actualizarBotones();
   }
 
   function actualizarBotones() {
     const ocupado = Boolean(abortador);
-    el.excel.disabled = !lista.length;
-    el.zip.disabled = !lista.length || ocupado;
+    const hay = seleccion.size > 0 || lista.length > 0;
+    el.excel.disabled = !hay;
+    el.zip.disabled = !hay || ocupado;
     el.cargar.disabled = cargando || ocupado;
+  }
+
+  function marcar(dnis, si) {
+    for (const dni of dnis) {
+      if (si) seleccion.add(dni);
+      else seleccion.delete(dni);
+    }
+    if (!seleccion.size) soloSeleccion = false;
+    pintar();
   }
 
   /* ------------------------------------------------------------------ */
@@ -141,19 +192,29 @@ export function montarExportacion() {
 
   /** Lo que dice el nombre del archivo sobre el filtro: "VIGENTE", "TA AE"... */
   function sufijoFiltro() {
-    const partes = [...estadosElegidos];
+    const partes = seleccion.size ? [`SELECCION ${seleccion.size}`, ...estadosElegidos] : [...estadosElegidos];
     const riesgos = [...selRiesgo.obtener()];
     if (riesgos.length) partes.push(riesgos.join(" "));
     return partes.length ? ` ${partes.join(" ")}` : "";
   }
 
+  /** Lo que se va a bajar; si la seleccion no deja a nadie (por estado o RRCC), avisa. */
+  function objetivoOAviso() {
+    const objetivo = aExportar();
+    if (!objetivo.length) {
+      consola("ninguno de los seleccionados tiene autorizaciones con el filtro de estado y RRCC actual", "warn");
+    }
+    return objetivo;
+  }
+
   async function exportarExcel() {
-    if (!lista.length) return;
+    const objetivo = objetivoOAviso();
+    if (!objetivo.length) return;
     const nombre = `EXPORTACION RRCC A ${hoyIso()}${sufijoFiltro()}.xlsx`;
     el.excel.disabled = true;
     try {
-      descargarBlob(await armarXlsx(hojasDeExportacion(lista)), nombre);
-      consola(`${lista.length} persona(s) exportadas a ${nombre}`, "ok");
+      descargarBlob(await armarXlsx(hojasDeExportacion(objetivo)), nombre);
+      consola(`${objetivo.length} persona(s) exportadas a ${nombre}`, "ok");
     } catch (e) {
       consola(`no se pudo exportar el Excel: ${e.message}`, "err");
       notificar("No se pudo exportar", e.message, "warn");
@@ -163,16 +224,18 @@ export function montarExportacion() {
   }
 
   /**
-   * El ZIP con los certificados de la lista que se esta viendo. Se congela la
-   * lista al empezar: cambiar el filtro mientras baja no la altera.
+   * El ZIP con los certificados de los seleccionados o, sin seleccion, de la
+   * lista que se esta viendo. Se congela al empezar: cambiar el filtro o la
+   * seleccion mientras baja no la altera.
    *
    * Con mas de MAX_CERTIFICADOS_POR_ZIP autorizaciones se baja en varios ZIP,
    * uno tras otro (cada uno con su INDICE): un solo ZIP de miles de PDF no
    * cabe en la memoria del navegador. Se pide confirmacion antes.
    */
   async function descargarZip() {
-    if (!lista.length || abortador) return;
-    const objetivo = lista;
+    if (abortador) return;
+    const objetivo = objetivoOAviso();
+    if (!objetivo.length) return;
     const total = objetivo.reduce((n, x) => n + x.rrcc.length, 0);
     const partes = partirEnZips(objetivo);
     if (
@@ -344,7 +407,38 @@ export function montarExportacion() {
 
   el.cargar.addEventListener("click", () => cargar());
   el.recargar.addEventListener("click", () => cargar({ refrescar: true }));
-  el.buscar.addEventListener("input", pintar);
+  el.buscar.addEventListener("input", () => {
+    soloSeleccion = false;
+    pintar();
+  });
+  // Enter marca a todos los que encontro y limpia el buscador para la siguiente busqueda
+  el.buscar.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || !el.buscar.value.trim()) return;
+    ev.preventDefault();
+    const nuevos = encontrados.map((x) => x.persona.dni);
+    el.buscar.value = "";
+    marcar(nuevos, true);
+    consola(`${nuevos.length} persona(s) agregada(s) a la selección · ${seleccion.size} en total`, "info");
+  });
+  el.resultados.addEventListener("change", (ev) => {
+    const caja = ev.target.closest("input[type=checkbox]");
+    if (!caja) return;
+    if (caja.hasAttribute("data-ex-todos")) marcar(lista.map((x) => x.persona.dni), caja.checked);
+    else marcar([caja.dataset.exDni], caja.checked);
+  });
+  // clic en cualquier parte de la fila tambien la marca (la casilla ya lo hace sola)
+  el.resultados.addEventListener("click", (ev) => {
+    if (ev.target.closest("input")) return;
+    const fila = ev.target.closest("tr[data-ex-dni]");
+    if (fila) marcar([fila.dataset.exDni], !seleccion.has(fila.dataset.exDni));
+  });
+  // la vista de seleccionados los muestra a todos: sin busqueda, que escribir la cierra
+  el.soloSel.addEventListener("click", () => {
+    soloSeleccion = !soloSeleccion && seleccion.size > 0;
+    if (soloSeleccion) el.buscar.value = "";
+    pintar();
+  });
+  el.quitarSel.addEventListener("click", () => marcar([...seleccion], false));
   selRiesgo.alCambiar(pintar);
   for (const boton of el.estados) {
     boton.addEventListener("click", () => {

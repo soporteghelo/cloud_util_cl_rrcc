@@ -776,8 +776,13 @@
                 id="ex-buscar"
                 type="search"
                 autocomplete="off"
-                placeholder="ej. LOPEZ, 71481337, MINA"
+                placeholder="ej. CONDORI, 71481337, LOPEZ MARIO"
+                title="Varias búsquedas a la vez separadas por coma; se puede pegar una lista de DNI. Enter marca a los encontrados y limpia el buscador"
               />
+              <div class="ex-ayuda">
+                Separa con coma para buscar varios. <b>Enter</b> marca a los encontrados y limpia el buscador para
+                buscar al siguiente; con alguien marcado, EXCEL y ZIP bajan solo la selección.
+              </div>
 
               <label class="lbl">Estado de la autorización</label>
               <div class="et-tipos" role="group" aria-label="Filtrar por estado de la autorización">
@@ -865,6 +870,20 @@
           <section class="panel panel-res">
             <div class="panel-head">
               <h2>02 · AUTORIZADOS</h2>
+              <span class="count ex-sel" id="ex-sel"></span>
+              <button
+                class="lnk lnk-junto"
+                id="ex-solo-sel"
+                type="button"
+                aria-pressed="false"
+                title="Mostrar en la tabla solo a los seleccionados"
+                hidden
+              >
+                ver seleccionados
+              </button>
+              <button class="lnk lnk-junto" id="ex-quitar-sel" type="button" title="Desmarcar a todos" hidden>
+                quitar selección
+              </button>
               <span class="count" id="ex-res-count"></span>
             </div>
             <div class="panel-body ex-body">
