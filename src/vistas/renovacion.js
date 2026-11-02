@@ -799,8 +799,11 @@ export function montarRenovacion() {
       const pct = armado.total ? Math.min(100, Math.round((armado.hecho / armado.total) * 100)) : 0;
       return { listo: false, texto: armado.texto || "bajando certificados…", pct, eta: etaDe(armado) };
     }
-    return ficha.salida?.archivos?.length ? { listo: true } : null;
+    return zipEnMemoria(ficha.salida) ? { listo: true } : null;
   }
+
+  /** Ya armado en el navegador. Sin certificados (quitados con la "x" o sin ninguno) igual lleva el Word. */
+  const zipEnMemoria = (salida) => Boolean(salida?.archivos?.length || (Array.isArray(salida?.archivos) && salida.blobs));
 
   /** Una mitad del aviso (ZIP o DRIVE), con su propio estado, avance y tiempo restante. */
   function htmlMitad({ tipo, destino, estado, pct, eta, detalle = "", accion = "" }) {
@@ -1299,7 +1302,8 @@ export function montarRenovacion() {
     // un tipo A/C cambiado despues de armar la carpeta: el ZIP sale con lo de ahora
     if (ficha) await archivosAlDia(dni, ficha);
     const locales = ficha?.salida?.archivos || [];
-    if (!folderId && !locales.length) return null;
+    const enMemoria = zipEnMemoria(ficha?.salida);
+    if (!folderId && !enMemoria) return null;
 
     const nombre = (ficha?.persona?.nombreCompleto || dni).replace(/[\\/:*?"<>|]+/g, " ").trim() || dni;
     const zip = new JSZip();
@@ -1315,7 +1319,7 @@ export function montarRenovacion() {
 
     try {
       // el fotocheck va solo dentro del Word, no como imagen suelta
-      if (locales.length) {
+      if (enMemoria) {
         total = 1 + FASE_ZIP;
         mostrarProgreso(dni, "zip", { hecho: 0, total, texto: "armando el Word…" });
         const docs = await documentosActuales(ficha);
@@ -1678,7 +1682,7 @@ export function montarRenovacion() {
       ? `<a class="btn btn-ghost btn-sm" href="https://drive.google.com/drive/folders/${folderId}" target="_blank" rel="noopener" data-carpeta-abrir="${dni}">ABRIR CARPETA</a>` +
         `<button type="button" class="btn btn-ghost btn-sm" data-carpeta-zip="${dni}">DESCARGAR CARPETA</button>` +
         `<a class="btn btn-ghost btn-sm" href="https://wa.me/?text=${mensajeWhatsapp}" target="_blank" rel="noopener" data-carpeta-whatsapp="${dni}" title="Antes de abrir WhatsApp, actualiza el fotocheck y el Word de la carpeta con lo que se ve ahora en la ficha. El mensaje lleva el link de la carpeta, el DNI y el nombre: solo falta elegir el contacto y enviar">ENVIAR POR WHATSAPP</a>`
-      : (datos?.salida || salida)?.archivos?.length
+      : zipEnMemoria(datos?.salida || salida)
         ? `<button type="button" class="btn btn-ghost btn-sm" data-carpeta-zip="${dni}">DESCARGAR ZIP</button>`
         : "";
 

@@ -6,7 +6,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { certificadosDeCarpeta, certificadosDeRrcc, claveCertificado } from "../src/lib/renovacion.js";
+import { certificadosDeCarpeta, certificadosDeRrcc, claveCertificado, nombresEnCarpeta } from "../src/lib/renovacion.js";
 
 const deDrive = (codigo, fecha) => ({
   id: `drive-${codigo}`,
@@ -101,4 +101,16 @@ test("certificadosDeRrcc marca cuales entran y con que nombre, segun el tipo que
   const [comoC] = certificadosDeRrcc([fila("TA", "C", "ACTUALIZAR", ta)]);
   assert.equal(comoC.entra, false);
   assert.equal(comoC.archivo, comoA.archivo, "mismo nombre: asi se encuentra para quitarlo");
+});
+
+test("dos inducciones con el mismo nombre de PDF: van las dos y la x de una no se lleva a la otra", () => {
+  const induccion = (id, curso) => ({ origen: "INDUCCION", id, curso, fecha: "", archivo: "43598313_ASTO PRUDENCIO.pdf", descargable: true });
+  const vieja = induccion("a", "REINDUCCIÓN 2025");
+  const nueva = induccion("b", "REINDUCCIÓN 2026");
+  const { tareas } = certificadosDeCarpeta({ detalle: [], personales: [], inventario: { items: [vieja, nueva] } });
+  const [nombreViejo, nombreNuevo] = tareas.map((t) => t.archivo);
+  assert.notEqual(nombreViejo, nombreNuevo);
+  assert.equal(nombreNuevo, "REINDUCCIÓN 2026_43598313_ASTO PRUDENCIO.pdf");
+  assert.ok(nombresEnCarpeta(vieja).includes(nombreViejo));
+  assert.ok(!nombresEnCarpeta(vieja).includes(nombreNuevo));
 });

@@ -106,15 +106,26 @@ export const claveCertificado = (cert) => [cert.origen, cert.id, cert.datosDesca
 /** Origenes del panel lateral de la ficha: van a la carpeta salvo que se quiten con la "x". */
 export const ORIGENES_LATERALES = ["EIN", "INDUCCION"];
 
-/** Nombre con que un certificado del panel lateral se guarda en la carpeta y en el ZIP. */
-export const nombreEnCarpeta = (cert) => (cert.archivo ? nombrePersonal(cert) : nombreCertificado(cert));
+/**
+ * Nombre con que un certificado del panel lateral se guarda en la carpeta y en
+ * el ZIP. Los PDF de inducción se llaman igual todos los años (DNI_NOMBRE.pdf,
+ * cada uno en la carpeta de su año): el curso los distingue, o uno pisaria al
+ * otro y la "x" de uno se llevaria a los dos.
+ */
+export const nombreEnCarpeta = (cert) => {
+  if (!cert.archivo) return nombreCertificado(cert);
+  return cert.origen === "INDUCCION" ? nombrePersonal({ archivo: `${cert.curso}_${cert.archivo}` }) : nombrePersonal(cert);
+};
 
 /**
  * Nombres con que ese certificado puede haber quedado en la carpeta de la
  * persona (como certificado de un RRCC o como PDF suelto de Drive): la "x"
- * del panel lateral los manda a la papelera.
+ * del panel lateral los manda a la papelera. El nombre suelto de un PDF de
+ * inducción no cuenta: es el mismo en todos los años.
  */
-export const nombresEnCarpeta = (cert) => [...new Set([nombreEnCarpeta(cert), nombreCertificado(cert), nombrePersonal(cert)])];
+export const nombresEnCarpeta = (cert) => [
+  ...new Set([nombreEnCarpeta(cert), nombreCertificado(cert), ...(cert.origen === "INDUCCION" ? [] : [nombrePersonal(cert)])]),
+];
 
 /* ------------------------------------------------------------------ */
 /* Paso 1-4: recalcular y guardar la fila                              */
