@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "7f07872b-98b3-49cc-9a48-87d5e3e85e66",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\candidate.json",
+  "output": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.html",
+  "specification": {
+    "sha256": "241952ea154ab1cf805016721a6c39f5c121e43723fa34281f1e7bc99c3b66a3",
+    "bytes": 43671
+  },
+  "artifact": {
+    "sha256": "ac1c4826428abbd31f16d407a60d0df93503392b2c72e62ea1905d9b6e5b0b2d",
+    "bytes": 792584
+  }
+}

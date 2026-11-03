@@ -48,6 +48,9 @@
           <button class="tab" id="tab-exportacion" type="button" role="tab" aria-selected="false">
             EXPORTACIÓN
           </button>
+          <button class="tab" id="tab-emitidos" type="button" role="tab" aria-selected="false">
+            EMITIDOS
+          </button>
           <button class="tab" id="tab-manual" type="button" role="tab" aria-selected="false">
             MANUAL
           </button>
@@ -898,6 +901,118 @@
             </div>
             <div class="panel-body panel-body-flush">
               <div class="term" id="ex-term" role="log" aria-live="polite"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ============================================================= -->
+      <!-- EMITIDOS · certificados JOMISER de un mes, carpeta por RRCC    -->
+      <!-- ============================================================= -->
+      <div class="vista" id="vista-emitidos" hidden>
+        <div class="col col-in">
+          <section class="panel panel-obj">
+            <div class="panel-head">
+              <h2>01 · MES</h2>
+              <span class="count" id="em-count">0 personas</span>
+              <button
+                class="lnk lnk-recargar"
+                id="em-recargar"
+                type="button"
+                title="Volver a traer el personal de la hoja, ignorando lo ya cargado"
+                hidden
+              >
+                ↻ recargar
+              </button>
+            </div>
+            <div class="panel-body panel-body-col">
+              <div class="form-2">
+                <div>
+                  <label class="lbl" for="em-mes">Mes</label>
+                  <select class="inp" id="em-mes"></select>
+                </div>
+                <div>
+                  <label class="lbl" for="em-anio">Año</label>
+                  <select class="inp" id="em-anio"></select>
+                </div>
+              </div>
+
+              <label class="lbl" for="em-riesgo-btn">Riesgo crítico</label>
+              <div class="msel" id="em-riesgo">
+                <button class="inp msel-btn" id="em-riesgo-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="msel-txt">TODOS LOS RRCC</span>
+                  <span class="msel-car">▾</span>
+                </button>
+                <div class="msel-panel" role="listbox" aria-multiselectable="true" hidden></div>
+              </div>
+
+              <div class="avisos">
+                <div class="alert alert-info">
+                  Personal ACTIVO con RRCC autorizados ("A"; en Instalaciones Eléctricas también "C") cuya
+                  <b>fecha de capacitación en la hoja</b> cae en el mes elegido. <b>DESCARGAR ZIP</b> baja de JOMISER el certificado de cada uno con esa misma fecha, en
+                  una carpeta por RRCC. Lo que JOMISER no tiene (ES y HM suelen venir de EIN o de la reinducción)
+                  queda anotado en el <code>INDICE.xlsx</code> del ZIP.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel panel-go">
+            <div class="panel-body">
+              <button class="btn btn-go" id="em-cargar" type="button">
+                <span class="go-txt">CARGAR PERSONAL</span>
+                <span class="go-arrow">▸</span>
+              </button>
+              <div class="form-2">
+                <button
+                  class="btn btn-ghost"
+                  id="em-excel"
+                  type="button"
+                  title="Descargar en Excel la lista del mes según la hoja (sin consultar JOMISER)"
+                  disabled
+                >
+                  EXCEL
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  id="em-zip"
+                  type="button"
+                  title="Descargar un ZIP con una carpeta por RRCC y el certificado de JOMISER de cada persona"
+                  disabled
+                >
+                  DESCARGAR ZIP
+                </button>
+              </div>
+              <button class="btn btn-stop" id="em-stop" type="button" hidden>ABORTAR</button>
+              <div class="bar-wrap" id="em-bar-wrap" hidden>
+                <div class="bar"><div class="bar-fill" id="em-bar-fill"></div></div>
+                <div class="bar-meta">
+                  <span id="em-bar-txt">en espera</span>
+                  <span id="em-bar-pct">0%</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col col-out">
+          <section class="panel panel-res">
+            <div class="panel-head">
+              <h2>02 · RRCC DEL MES</h2>
+              <span class="count" id="em-res-count"></span>
+            </div>
+            <div class="panel-body ex-body">
+              <div id="em-resultados"></div>
+            </div>
+          </section>
+
+          <section class="panel panel-term">
+            <div class="panel-head">
+              <h2>03 · CONSOLA</h2>
+              <button class="lnk" id="em-log-clear" type="button">limpiar</button>
+            </div>
+            <div class="panel-body panel-body-flush">
+              <div class="term" id="em-term" role="log" aria-live="polite"></div>
             </div>
           </section>
         </div>

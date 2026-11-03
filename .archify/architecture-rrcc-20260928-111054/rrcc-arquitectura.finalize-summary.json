@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\candidate.json",
+    "sha256": "3b5a678201969a3dd3b5b630eccdae5050b660f4a8d8e320802b817ea7b044b9",
+    "bytes": 43671
+  },
+  "artifact": {
+    "path": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.html",
+    "sha256": "ad56588ef6bde42b18dd792a994768a8b27207170302a6405c60cebc1ef97e85",
+    "bytes": 792467
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "fail"
+  },
+  "failedStage": "browser-check",
+  "diagnostics": [
+    {
+      "code": "viewer/evidence-path-conflict",
+      "severity": "error",
+      "message": "browser-check will not replace the existing unowned evidence path \"C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.browser-check.json\".",
+      "subject": {
+        "artifact": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.html",
+        "evidencePath": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.browser-check.json"
+      },
+      "evidence": {
+        "reason": {
+          "code": "ownership-artifact-mismatch"
+        }
+      },
+      "supportedFixes": [
+        "move the conflicting file aside, or choose a separate --out-dir, then rerun browser-check"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.finalize.json",
+    "summaryReceipt": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\YOGA\\Downloads\\PROYECTOS SCRIPT\\UTILITARIOS\\RRCC_ALL\\.archify\\architecture-rrcc-20260928-111054\\rrcc-arquitectura.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-09-28T16:10:55.296Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2230
+}

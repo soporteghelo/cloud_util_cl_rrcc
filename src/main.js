@@ -28,6 +28,7 @@ import { montarNuevo } from "./vistas/nuevo.js";
 import { montarEstado } from "./vistas/estado.js";
 import { montarEstadoTotal } from "./vistas/estado-total.js";
 import { montarExportacion } from "./vistas/exportacion.js";
+import { montarEmitidos } from "./vistas/emitidos.js";
 import { montarManual } from "./vistas/manual.js";
 import { montarVerRrcc } from "./vistas/ver-rrcc.js";
 import { montarVerificacion } from "./vistas/verificacion.js";
@@ -756,6 +757,7 @@ el.carpeta.addEventListener("click", async () => {
       ["tab-estado", "vista-estado"],
       ["tab-estado-total", "vista-estado-total"],
       ["tab-exportacion", "vista-exportacion"],
+      ["tab-emitidos", "vista-emitidos"],
       ["tab-manual", "vista-manual"],
       ["tab-ver-rrcc", "vista-ver-rrcc"],
     ],
@@ -771,6 +773,7 @@ el.carpeta.addEventListener("click", async () => {
   montarEstado();
   montarEstadoTotal();
   montarExportacion();
+  montarEmitidos();
   montarManual();
   montarVerRrcc();
   montarVerificacion();

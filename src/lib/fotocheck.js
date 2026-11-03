@@ -20,6 +20,7 @@ const AZUL = "#002060";
 const GRIS_LOGO = "#929292";
 const BORDE = "#4472C4";
 const GRIS_A = "#BFBFBF";
+const CELESTE = "#4FC3F7";
 
 const BASE_W = 1400;
 const BASE_H = 920;
@@ -375,6 +376,11 @@ function panelDerecho(ctx, p, editables) {
     texto(ctx, resto, x, ty, { tam: 22 });
     ty += 33;
   }
+
+  /* Marco celeste delgado que encierra toda la cara, a la misma altura que el
+     anverso y un poco por fuera de la grilla para no pisar sus casillas. */
+  const holgura = 5;
+  caja(ctx, X - holgura, 6, W + 2 * holgura, 906, { borde: CELESTE, grosor: 2 });
 }
 
 /* ------------------------------------------------------------------ */

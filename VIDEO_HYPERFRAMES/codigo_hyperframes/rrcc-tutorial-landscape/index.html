@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<title>Riesgos Críticos — Tutorial</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face { font-family: "Inter"; font-weight: 400; src: url("assets/fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url("assets/fonts/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 700; src: url("assets/fonts/inter-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 800; src: url("assets/fonts/inter-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 500; src: url("assets/fonts/space-grotesk-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 700; src: url("assets/fonts/space-grotesk-latin-700-normal.woff2") format("woff2"); }
+
+:root { --ac: #38bdf8; --ac2: #a78bfa; --bg1: #070b16; --bg2: #111a33; --tx: #eef2ff; --mu: #a3adc8; --card: rgba(255,255,255,0.06); --line: rgba(255,255,255,0.12); }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg1); }
+#root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "Inter", sans-serif; color: var(--tx); }
+em { font-style: normal; color: var(--ac); }
+
+/* Fondo */
+.bg { position: absolute; inset: 0; background: radial-gradient(ellipse at 20% 0%, var(--bg2) 0%, var(--bg1) 60%); }
+.blob { position: absolute; width: 1300px; height: 1300px; border-radius: 50%; opacity: 0.30; }
+.blob1 { left: -420px; top: -480px; background: radial-gradient(circle at center, var(--ac) 0%, transparent 62%); }
+.blob2 { right: -480px; bottom: -520px; background: radial-gradient(circle at center, var(--ac2) 0%, transparent 62%); }
+.grid { position: absolute; inset: 0; opacity: 0.35;
+  background-image: linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 64px 64px; }
+.bug { position: absolute; right: 48px; top: 40px; height: 56px; width: auto; opacity: 0; z-index: 20; }
+
+/* Escena */
+.scene { position: absolute; inset: 0; }
+.inner { position: absolute; inset: 0; opacity: 0; }
+.center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 140px 120px; gap: 28px; }
+.stack { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 120px 170px; gap: 44px; text-align: center; }
+.kicker { display: inline-flex; align-items: center; gap: 12px; padding: 10px 22px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid var(--line);
+  font: 600 24px "Inter"; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ac); }
+.ico { width: 1em; height: 1em; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ksm { width: 26px; height: 26px; }
+.title { font: 700 78px/1.08 "Space Grotesk"; letter-spacing: -0.02em; max-width: 1640px; }
+.title.hero { font-size: 104px; }
+.title .w { display: inline-block; }
+.sub { font: 400 36px/1.4 "Inter"; color: var(--mu); max-width: 1300px; }
+.hero-ico, .chapnum { display: flex; align-items: center; justify-content: center; }
+.hero-ico { width: 132px; height: 132px; border-radius: 34px; font-size: 70px; color: #fff;
+  background: linear-gradient(135deg, var(--ac), var(--ac2)); box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 80px rgba(56,189,248,0.35); }
+.chapnum { font: 700 190px/1 "Space Grotesk"; background: linear-gradient(135deg, var(--ac), var(--ac2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.chips { display: flex; flex-wrap: wrap; gap: 18px; justify-content: center; margin-top: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 12px; padding: 14px 26px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); font: 600 28px "Inter"; }
+.csm { width: 30px; height: 30px; color: var(--ac); }
+
+/* Tarjetas */
+.cards { display: grid; gap: 28px; width: 100%; max-width: 1680px; }
+.cards.n2 { grid-template-columns: repeat(2, 1fr); }
+.cards.n3 { grid-template-columns: repeat(3, 1fr); }
+.cards.n4 { grid-template-columns: repeat(2, 1fr); }
+.cards.n5, .cards.n6 { grid-template-columns: repeat(3, 1fr); }
+.card { display: flex; gap: 22px; align-items: flex-start; text-align: left; padding: 30px 32px; border-radius: 26px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.25); }
+.cico { flex: none; width: 66px; height: 66px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 34px; color: #fff;
+  background: linear-gradient(135deg, var(--ac), var(--ac2)); }
+.pain .cico { background: linear-gradient(135deg, #f97316, #ef4444); }
+.ct { font: 700 32px/1.2 "Space Grotesk"; }
+.cd { margin-top: 10px; font: 400 25px/1.4 "Inter"; color: var(--mu); }
+
+/* Pasos */
+.steps { position: relative; display: grid; gap: 26px; width: 100%; max-width: 1700px; }
+.steps.n3 { grid-template-columns: repeat(3, 1fr); }
+.steps.n4 { grid-template-columns: repeat(4, 1fr); }
+.steps.n5 { grid-template-columns: repeat(5, 1fr); }
+.steps .card { flex-direction: column; align-items: center; text-align: center; padding: 34px 24px; position: relative; }
+.steps .num, .toc .num { font: 700 26px "Space Grotesk"; color: var(--ac); }
+.steps-line { position: absolute; left: 12%; right: 12%; top: 58%; height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--ac), var(--ac2)); transform-origin: left center; opacity: 0.5; }
+.toc { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px 28px; width: 100%; max-width: 1600px; }
+.toc .card { align-items: center; padding: 22px 28px; }
+.toc .cico { width: 56px; height: 56px; font-size: 28px; }
+.toc .ct { font-size: 30px; }
+
+/* Cifras */
+.stats { display: flex; gap: 40px; justify-content: center; width: 100%; }
+.stat { flex: 1; max-width: 460px; padding: 40px 30px; border-radius: 28px; background: var(--card); border: 1px solid var(--line); }
+.sv { font: 700 120px/1 "Space Grotesk"; background: linear-gradient(135deg, var(--ac), var(--ac2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sl { margin-top: 16px; font: 500 28px/1.35 "Inter"; color: var(--tx); }
+
+/* Antes / después */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; width: 100%; max-width: 1600px; text-align: left; }
+.col { padding: 36px 40px; border-radius: 28px; border: 1px solid var(--line); background: var(--card); }
+.col.bad { background: rgba(239,68,68,0.07); border-color: rgba(239,68,68,0.3); }
+.col.good { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.35); }
+.colh { font: 700 38px "Space Grotesk"; margin-bottom: 22px; }
+.row { display: flex; gap: 16px; align-items: flex-start; font: 500 29px/1.35 "Inter"; margin-top: 16px; }
+.rsm { width: 34px; height: 34px; margin-top: 2px; }
+.bad .rsm { color: #f87171; }
+.good .rsm { color: #4ade80; }
+
+/* CTA */
+.cta .prod { font: 700 120px/1 "Space Grotesk"; letter-spacing: -0.03em; background: linear-gradient(135deg, #fff, var(--ac)); -webkit-background-clip: text; background-clip: text; color: transparent; padding-bottom: 8px; }
+.cta .title { font-size: 58px; }
+.btn { display: inline-flex; align-items: center; gap: 16px; padding: 26px 48px; border-radius: 999px; font: 700 38px "Inter"; color: #061019;
+  background: linear-gradient(135deg, var(--ac), var(--ac2)); box-shadow: 0 20px 60px rgba(0,0,0,0.35), 0 0 60px rgba(56,189,248,0.35); }
+.bsm { width: 40px; height: 40px; }
+.contact { font: 600 32px "Inter"; color: var(--mu); }
+.cta-logo { height: 110px; width: auto; }
+
+/* Pantallas */
+.shead { position: absolute; left: 0; right: 0; top: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 0 120px; }
+.shead .title.st { font-size: 54px; }
+.shead .kicker { font-size: 20px; padding: 8px 18px; }
+.devwrap { position: absolute; }
+.device { border-radius: 18px; overflow: hidden; background: #0d1222; border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 40px 120px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4); }
+.chrome { height: 44px; display: flex; align-items: center; gap: 9px; padding: 0 18px; background: #1a2035; }
+.chrome i { width: 13px; height: 13px; border-radius: 50%; background: #3b4462; }
+.chrome i:nth-child(1) { background: #ff5f57; } .chrome i:nth-child(2) { background: #febc2e; } .chrome i:nth-child(3) { background: #28c840; }
+.url { margin-left: 18px; flex: 1; max-width: 520px; height: 28px; border-radius: 8px; background: #0f1426; display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  font: 500 16px "Inter"; color: #8b95b5; }
+.usm { width: 14px; height: 14px; }
+.viewport { position: relative; overflow: hidden; background: #fff; }
+.zoomer { position: absolute; left: 0; top: 0; }
+.shot { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.hl { position: absolute; border: 4px solid var(--ac); border-radius: 12px; opacity: 0;
+  box-shadow: 0 0 0 4000px rgba(5,10,25,0.38), 0 0 28px var(--ac); }
+.cursor { position: absolute; left: 0; top: 0; width: 46px; height: 46px; color: #0b1020; transform-origin: 0 0; opacity: 0; z-index: 5; }
+.cursor .cur { width: 46px; height: 46px; fill: #fff; stroke: #0b1020; stroke-width: 1.6; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.45)); }
+.ripple { position: absolute; left: 0; top: 0; width: 60px; height: 60px; border-radius: 50%; border: 5px solid var(--ac); opacity: 0; z-index: 4; }
+
+/* Tutorial: riel izquierdo */
+.rail { position: absolute; left: 60px; top: 70px; width: 450px; display: flex; flex-direction: column; gap: 22px; }
+.stepb { align-self: flex-start; padding: 10px 20px; border-radius: 12px; font: 700 24px "Space Grotesk"; color: #061019; background: linear-gradient(135deg, var(--ac), var(--ac2)); }
+.rail .kicker { align-self: flex-start; font-size: 18px; padding: 7px 16px; }
+.rail .title.rt { font-size: 46px; line-height: 1.12; text-align: left; }
+.bul { list-style: none; display: flex; flex-direction: column; gap: 18px; margin-top: 8px; }
+.bul li { display: flex; gap: 14px; align-items: flex-start; font: 500 25px/1.38 "Inter"; color: #d6dcf0; }
+.bsm2 { width: 28px; height: 28px; color: var(--ac); margin-top: 2px; }
+
+/* Subtítulos */
+.cap { position: absolute; left: 560px; width: 1300px; top: 930px; display: flex; justify-content: center; z-index: 30; }
+.cap span { display: inline-block; max-width: 100%; text-align: center; padding: 12px 26px; border-radius: 16px; background: rgba(4,8,20,0.78); border: 1px solid rgba(255,255,255,0.1);
+  font: 600 34px/1.32 "Inter"; color: #fff; }
+
+/* Vertical (9:16) */
+.portrait .center { padding: 0 70px 260px; }
+.portrait .stack { padding: 120px 60px 420px; gap: 40px; }
+.portrait .title { font-size: 76px; }
+.portrait .title.hero { font-size: 92px; }
+.portrait .sub { font-size: 38px; }
+.portrait .cards, .portrait .cards.n2, .portrait .cards.n3, .portrait .cards.n4, .portrait .cards.n5, .portrait .cards.n6 { grid-template-columns: 1fr; gap: 22px; }
+.portrait .card { padding: 26px 28px; }
+.portrait .ct { font-size: 34px; }
+.portrait .cd { font-size: 27px; }
+.portrait .steps, .portrait .steps.n3, .portrait .steps.n4, .portrait .steps.n5 { grid-template-columns: 1fr; gap: 20px; }
+.portrait .steps .card { flex-direction: row; text-align: left; padding: 24px 28px; }
+.portrait .steps-line { display: none; }
+.portrait .stats { flex-direction: column; align-items: center; gap: 26px; }
+.portrait .stat { width: 860px; max-width: 860px; padding: 30px; }
+.portrait .sv { font-size: 110px; }
+.portrait .compare { grid-template-columns: 1fr; gap: 26px; }
+.portrait .shead { top: 150px; padding: 0 60px; }
+.portrait .shead .title.st { font-size: 64px; }
+.portrait .cta .prod { font-size: 104px; }
+.portrait .cta .title { font-size: 60px; }
+.portrait .btn { font-size: 40px; }
+.portrait .toc { grid-template-columns: 1fr; }
+
+</style>
+</head>
+<body class="landscape tutorial">
+<div id="root" data-composition-id="main" data-start="0" data-duration="234.781" data-width="1920" data-height="1080">
+<div class="bg"><div class="blob blob1"></div><div class="blob blob2"></div><div class="grid"></div></div>
+
+<section id="s0" class="clip scene title " data-start="0" data-duration="10.35" data-track-index="1"><div class="inner"><div class="center"><div class="hero-ico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+  <path d="m9 12 2 2 4-4" />
+</svg>
+</div><div class="kicker">
+<svg class="ico ksm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+  <path d="M20 3v4" />
+  <path d="M22 5h-4" />
+  <path d="M4 17v2" />
+  <path d="M5 18H3" />
+</svg>
+Tutorial completo</div><h2 class="title hero"><span class="w s0-tw">Cómo</span> <span class="w s0-tw">usar</span> <span class="w s0-tw"><em>Riesgos Críticos</em></span></h2><p class="sub">Renovación, certificados, fotochecks y control del personal</p>
+        </div></div></section>
+<section id="s1" class="clip scene toc " data-start="10.35" data-duration="5.515" data-track-index="1"><div class="inner"><div class="stack"><div class="kicker">
+<svg class="ico ksm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+  <path d="M20 3v4" />
+  <path d="M22 5h-4" />
+  <path d="M4 17v2" />
+  <path d="M5 18H3" />
+</svg>
+Lo que verás</div><h2 class="title "><span class="w s1-tw">Contenido</span></h2><div class="toc n6">
+        <div class="card s1-it"><div class="num">01</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+  <path d="M21 3v5h-5" />
+  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+  <path d="M8 16H3v5" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Renovación</div></div></div>
+        <div class="card s1-it"><div class="num">02</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M16 10h2" />
+  <path d="M16 14h2" />
+  <path d="M6.17 15a3 3 0 0 1 5.66 0" />
+  <circle cx="9" cy="11" r="2" />
+  <rect x="2" y="5" width="20" height="14" rx="2" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Fotocheck</div></div></div>
+        <div class="card s1-it"><div class="num">03</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+  <polyline points="7 10 12 15 17 10" />
+  <line x1="12" x2="12" y1="15" y2="3" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Certificados</div></div></div>
+        <div class="card s1-it"><div class="num">04</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+  <circle cx="9" cy="7" r="4" />
+  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Nuevo personal</div></div></div>
+        <div class="card s1-it"><div class="num">05</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+  <path d="M7 16h8" />
+  <path d="M7 11h12" />
+  <path d="M7 6h3" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Estados y exportación</div></div></div>
+        <div class="card s1-it"><div class="num">06</div>
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+  <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+  <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Fotochecks del personal</div></div></div></div></div></div></section>
+<section id="s2" class="clip scene chapter " data-start="15.865" data-duration="3.459" data-track-index="1"><div class="inner"><div class="center"><div class="chapnum">01</div><h2 class="title "><span class="w s2-tw">Renovación</span></h2>
+        </div></div></section>
+<section id="s3" class="clip scene screen " data-start="19.324" data-duration="20.429" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 1</div><h2 class="title rt"><span class="w s3-tw">Consulta</span> <span class="w s3-tw">sin</span> <span class="w s3-tw">modificar</span> <span class="w s3-tw">nada</span></h2>
+          <ul class="bul"><li class="s3-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Un DNI por línea, o Excel / CSV</span></li><li class="s3-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Ctrl + Enter para consultar</span></li><li class="s3-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Solo lectura: no escribe nada</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s3-z" style="width:1300px;height:731.25px"><img class="shot s3-img0" src="assets/shots/captures_rrcc_shots__01-renov.png" alt=""><div class="hl s3-hl0" style="left:17.563px;top:156.5px;width:146.875px;height:298.813px"></div>
+        </div></div></div></div></div></section>
+<section id="s4" class="clip scene screen " data-start="39.752" data-duration="29.043" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 2</div><h2 class="title rt"><span class="w s4-tw">Lee</span> <span class="w s4-tw">la</span> <span class="w s4-tw">ficha</span> <span class="w s4-tw">de</span> <span class="w s4-tw">cada</span> <span class="w s4-tw">persona</span></h2>
+          <ul class="bul"><li class="s4-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Resumen de autorizaciones vigentes</span></li><li class="s4-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Alertas: vencidos, por vencer, fechas distintas</span></li><li class="s4-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Tarjetas A · autorizados y C · capacitados</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s4-z" style="width:1300px;height:731.25px"><img class="shot s4-img0" src="assets/shots/captures_rrcc_shots__02-consulta.png" alt=""><div class="hl s4-hl0" style="left:189px;top:89.875px;width:857px;height:101.375px"></div><div class="hl s4-hl1" style="left:193.063px;top:255.625px;width:598.625px;height:33.125px"></div><div class="hl s4-hl2" style="left:192.25px;top:172.75px;width:353.25px;height:38px"></div><div class="hl s4-hl3" style="left:192.25px;top:286.5px;width:918.75px;height:278.5px"></div><div class="hl s4-hl4" style="left:442.5px;top:416.5px;width:159.875px;height:36.375px"></div>
+        </div></div></div></div></div></section>
+<section id="s5" class="clip scene screen " data-start="68.796" data-duration="23.721" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 3</div><h2 class="title rt"><span class="w s5-tw">Renueva</span> <span class="w s5-tw">las</span> <span class="w s5-tw">autorizaciones</span></h2>
+          <ul class="bul"><li class="s5-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Actualiza la fila en Google Sheets</span></li><li class="s5-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Crea la carpeta de la persona en Drive</span></li><li class="s5-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Sube certificados, fotocheck y Word</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s5-z" style="width:1300px;height:731.25px"><img class="shot s5-img0" src="assets/shots/captures_rrcc_shots__02-consulta.png" alt=""><img class="shot s5-img1" src="assets/shots/captures_rrcc_shots__05-renovando.png" alt=""><img class="shot s5-img2" src="assets/shots/captures_rrcc_shots__06-renovado.png" alt=""><div class="hl s5-hl0" style="left:17.563px;top:626.125px;width:146.875px;height:49.375px"></div><div class="hl s5-hl2" style="left:189px;top:206.875px;width:1100.75px;height:107.875px"></div><div class="hl s5-hl3" style="left:173.563px;top:592px;width:1119.438px;height:133.875px"></div>
+        <div class="ripple s5-rip"></div><div class="cursor s5-cur">
+<svg class="ico cur"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" />
+</svg>
+</div></div></div></div></div></div></section>
+<section id="s6" class="clip scene chapter " data-start="92.517" data-duration="2.683" data-track-index="1"><div class="inner"><div class="center"><div class="chapnum">02</div><h2 class="title "><span class="w s6-tw">Fotocheck</span></h2>
+        </div></div></section>
+<section id="s7" class="clip scene screen " data-start="95.199" data-duration="21.865" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 4</div><h2 class="title rt"><span class="w s7-tw">Fotocheck</span> <span class="w s7-tw">automático</span></h2>
+          <ul class="bul"><li class="s7-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Se dibuja con los datos de la hoja</span></li><li class="s7-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Anverso y reverso</span></li><li class="s7-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Descarga como imagen o Word</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s7-z" style="width:1300px;height:731.25px"><img class="shot s7-img0" src="assets/shots/captures_rrcc_shots__02-consulta.png" alt=""><img class="shot s7-img1" src="assets/shots/captures_rrcc_shots__03-fotocheck.png" alt=""><div class="hl s7-hl0" style="left:886.938px;top:100.438px;width:148.5px;height:42.875px"></div><div class="hl s7-hl1" style="left:769.938px;top:305.188px;width:511.688px;height:353.25px"></div><div class="hl s7-hl3" style="left:769.938px;top:660.25px;width:515.75px;height:60.75px"></div>
+        <div class="ripple s7-rip"></div><div class="cursor s7-cur">
+<svg class="ico cur"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" />
+</svg>
+</div></div></div></div></div></div></section>
+<section id="s8" class="clip scene chapter " data-start="117.065" data-duration="3.704" data-track-index="1"><div class="inner"><div class="center"><div class="chapnum">03</div><h2 class="title "><span class="w s8-tw">Certificados</span></h2>
+        </div></div></section>
+<section id="s9" class="clip scene screen " data-start="120.769" data-duration="19.657" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 5</div><h2 class="title rt"><span class="w s9-tw">Descarga</span> <span class="w s9-tw">certificados</span> <span class="w s9-tw">en</span> <span class="w s9-tw">lote</span></h2>
+          <ul class="bul"><li class="s9-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Uno o varios DNI</span></li><li class="s9-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Busca en todas tus fuentes</span></li><li class="s9-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Un ZIP ordenado por persona</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s9-z" style="width:1300px;height:731.25px"><img class="shot s9-img0" src="assets/shots/captures_rrcc_shots__07-cert.png" alt=""><img class="shot s9-img1" src="assets/shots/captures_rrcc_shots__08-cert-resultado.png" alt=""><div class="hl s9-hl0" style="left:17.563px;top:114.25px;width:302.875px;height:483.25px"></div><div class="hl s9-hl1" style="left:339.313px;top:91.5px;width:946.375px;height:306.125px"></div><div class="hl s9-hl2" style="left:339.313px;top:410px;width:946.375px;height:47.75px"></div>
+        <div class="ripple s9-rip"></div><div class="cursor s9-cur">
+<svg class="ico cur"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" />
+</svg>
+</div></div></div></div></div></div></section>
+<section id="s10" class="clip scene chapter " data-start="140.426" data-duration="4.371" data-track-index="1"><div class="inner"><div class="center"><div class="chapnum">04</div><h2 class="title "><span class="w s10-tw">Nuevo</span> <span class="w s10-tw">personal</span></h2>
+        </div></div></section>
+<section id="s11" class="clip scene screen " data-start="144.797" data-duration="20.741" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 6</div><h2 class="title rt"><span class="w s11-tw">Alta</span> <span class="w s11-tw">con</span> <span class="w s11-tw">matriz</span> <span class="w s11-tw">por</span> <span class="w s11-tw">puesto</span></h2>
+          <ul class="bul"><li class="s11-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Datos de la persona</span></li><li class="s11-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>La matriz propone las A del cargo</span></li><li class="s11-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Alta y renovación en un paso</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s11-z" style="width:1300px;height:731.25px"><img class="shot s11-img0" src="assets/shots/captures_rrcc_shots__09-nuevo.png" alt=""><div class="hl s11-hl0" style="left:14.313px;top:99.625px;width:316.688px;height:68.875px"></div><div class="hl s11-hl1" style="left:14.313px;top:156.5px;width:316.688px;height:377.625px"></div><div class="hl s11-hl2" style="left:339.313px;top:124px;width:946.375px;height:117.625px"></div><div class="hl s11-hl3" style="left:14.313px;top:666.75px;width:306.125px;height:46.125px"></div>
+        <div class="ripple s11-rip"></div><div class="cursor s11-cur">
+<svg class="ico cur"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" />
+</svg>
+</div></div></div></div></div></div></section>
+<section id="s12" class="clip scene chapter " data-start="165.538" data-duration="4.329" data-track-index="1"><div class="inner"><div class="center"><div class="chapnum">05</div><h2 class="title "><span class="w s12-tw">Estados</span> <span class="w s12-tw">y</span> <span class="w s12-tw">exportación</span></h2>
+        </div></div></section>
+<section id="s13" class="clip scene screen " data-start="169.867" data-duration="14.533" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 7</div><h2 class="title rt"><span class="w s13-tw">Estado</span> <span class="w s13-tw">por</span> <span class="w s13-tw">riesgo</span> <span class="w s13-tw">crítico</span></h2>
+          <ul class="bul"><li class="s13-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Filtra por riesgo, estado o fecha</span></li><li class="s13-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Ordena de lo vencido a lo vigente</span></li><li class="s13-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Imprime o exporta a Excel</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s13-z" style="width:1300px;height:731.25px"><img class="shot s13-img0" src="assets/shots/captures_rrcc_shots__10-estado.png" alt=""><div class="hl s13-hl0" style="left:339.313px;top:77.688px;width:956.938px;height:603.5px"></div><div class="hl s13-hl1" style="left:14.313px;top:115.875px;width:316.688px;height:337px"></div><div class="hl s13-hl2" style="left:14.313px;top:665.125px;width:316.688px;height:54.25px"></div>
+        </div></div></div></div></div></section>
+<section id="s14" class="clip scene screen " data-start="184.399" data-duration="15.084" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 8</div><h2 class="title rt"><span class="w s14-tw">Estado</span> <span class="w s14-tw">total</span> <span class="w s14-tw">y</span> <span class="w s14-tw">exportación</span></h2>
+          <ul class="bul"><li class="s14-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Personas con algo vencido</span></li><li class="s14-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Lo más urgente primero</span></li><li class="s14-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>PDF, Excel, imagen o ZIP</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s14-z" style="width:1300px;height:731.25px"><img class="shot s14-img0" src="assets/shots/captures_rrcc_shots__11-total.png" alt=""><img class="shot s14-img1" src="assets/shots/captures_rrcc_shots__12-export.png" alt=""><div class="hl s14-hl0" style="left:339.313px;top:83.375px;width:946.375px;height:247.625px"></div><div class="hl s14-hl1" style="left:14.313px;top:665.125px;width:316.688px;height:54.25px"></div><div class="hl s14-hl2" style="left:328.75px;top:83.375px;width:956.938px;height:467px"></div>
+        </div></div></div></div></div></section>
+<section id="s15" class="clip scene screen " data-start="199.483" data-duration="12.767" data-track-index="1"><div class="inner"><div class="rail"><div class="stepb">Paso 9</div><h2 class="title rt"><span class="w s15-tw">Fotochecks</span> <span class="w s15-tw">de</span> <span class="w s15-tw">todo</span> <span class="w s15-tw">el</span> <span class="w s15-tw">personal</span></h2>
+          <ul class="bul"><li class="s15-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Galería de fotochecks</span></li><li class="s15-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>Filtros por estado, guardia y cargo</span></li><li class="s15-b">
+<svg class="ico bsm2"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M20 6 9 17l-5-5" />
+</svg>
+<span>ZIP de fotochecks y certificados</span></li></ul></div>
+          <div class="devwrap" style="left:560px;top:70px"><div class="device" style="width:1300px"><div class="chrome"><i></i><i></i><i></i><div class="url">
+<svg class="ico usm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+</svg>
+riesgos-criticos.app</div></div>
+        <div class="viewport" style="width:1300px;height:731.25px"><div class="zoomer s15-z" style="width:1300px;height:731.25px"><img class="shot s15-img0" src="assets/shots/captures_rrcc_shots__13-ver.png" alt=""><div class="hl s15-hl0" style="left:339.313px;top:83.375px;width:316.688px;height:247.625px"></div><div class="hl s15-hl1" style="left:14.313px;top:115.875px;width:316.688px;height:353.25px"></div><div class="hl s15-hl2" style="left:14.313px;top:624.5px;width:316.688px;height:93.25px"></div>
+        </div></div></div></div></div></section>
+<section id="s16" class="clip scene features " data-start="212.25" data-duration="13.12" data-track-index="1"><div class="inner"><div class="stack"><div class="kicker">
+<svg class="ico ksm"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+  <path d="M20 3v4" />
+  <path d="M22 5h-4" />
+  <path d="M4 17v2" />
+  <path d="M5 18H3" />
+</svg>
+Consejos</div><h2 class="title "><span class="w s16-tw">Buenas</span> <span class="w s16-tw">prácticas</span></h2><div class="cards n4">
+        <div class="card s16-it">
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <circle cx="11" cy="11" r="8" />
+  <path d="m21 21-4.3-4.3" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Consulta primero</div><div class="cd">Revisa la ficha antes de renovar.</div></div></div>
+        <div class="card s16-it">
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+  <path d="M12 9v4" />
+  <path d="M12 17h.01" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Atiende las alertas</div><div class="cd">Vencidos y fechas distintas al certificado.</div></div></div>
+        <div class="card s16-it">
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+  <circle cx="9" cy="7" r="4" />
+  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Matriz al día</div><div class="cd">Mantén actualizada la matriz por puesto.</div></div></div>
+        <div class="card s16-it">
+        <div class="cico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+  <path d="M7 16h8" />
+  <path d="M7 11h12" />
+  <path d="M7 6h3" />
+</svg>
+</div>
+        <div class="ctx"><div class="ct">Control semanal</div><div class="cd">Revisa Estado total cada semana.</div></div></div></div></div></div></section>
+<section id="s17" class="clip scene title " data-start="225.37" data-duration="9.111" data-track-index="1"><div class="inner"><div class="center"><div class="hero-ico">
+<svg class="ico"
+  
+  xmlns="http://www.w3.org/2000/svg"
+ 
+ 
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
+  <path d="m9 12 2 2 4-4" />
+</svg>
+</div><h2 class="title hero"><span class="w s17-tw">¡Listo!</span> <span class="w s17-tw">Ya</span> <span class="w s17-tw">dominas</span> <span class="w s17-tw"><em>Riesgos Críticos</em></span></h2><p class="sub">Autorizaciones siempre al día, sin Excel.</p>
+        </div></div></section>
+<div id="cap0_0" class="cap" data-start="0.55" data-duration="2.412" data-track-index="3"><span>Bienvenido al tutorial de Riesgos Críticos.</span></div>
+<div id="cap1_0" class="cap" data-start="3.262" data-duration="3.269" data-track-index="3"><span>Verás cómo renovar autorizaciones, descargar certificados,</span></div>
+<div id="cap1_1" class="cap" data-start="6.531" data-duration="2.968" data-track-index="3"><span>generar fotochecks y controlar a todo tu personal.</span></div>
+<div id="cap2_0" class="cap" data-start="10.9" data-duration="4.115" data-track-index="3"><span>La app tiene una pestaña para cada tarea. Vamos una por una.</span></div>
+<div id="cap3_0" class="cap" data-start="16.415" data-duration="2.059" data-track-index="3"><span>Empecemos por la pestaña Renovación.</span></div>
+<div id="cap4_0" class="cap" data-start="19.874" data-duration="3.69" data-track-index="3"><span>Escribe los DNI del personal a renovar, uno por línea.</span></div>
+<div id="cap4_1" class="cap" data-start="23.563" data-duration="2.678" data-track-index="3"><span>También puedes cargar un Excel o CSV.</span></div>
+<div id="cap5_0" class="cap" data-start="26.542" data-duration="3.183" data-track-index="3"><span>La app restaura los ceros a la izquierda que Excel suele borrar,</span></div>
+<div id="cap5_1" class="cap" data-start="29.724" data-duration="1.443" data-track-index="3"><span>y te muestra qué corrigió.</span></div>
+<div id="cap6_0" class="cap" data-start="31.467" data-duration="3.225" data-track-index="3"><span>Presiona Control más Enter para consultar y verificar.</span></div>
+<div id="cap6_1" class="cap" data-start="34.692" data-duration="4.211" data-track-index="3"><span>Esta consulta es de solo lectura: no escribe en la hoja ni en Drive.</span></div>
+<div id="cap7_0" class="cap" data-start="40.302" data-duration="3.059" data-track-index="3"><span>Cada persona aparece con su ficha: foto, DNI,</span></div>
+<div id="cap7_1" class="cap" data-start="43.362" data-duration="2.258" data-track-index="3"><span>datos del examen médico y área.</span></div>
+<div id="cap8_0" class="cap" data-start="45.919" data-duration="4.617" data-track-index="3"><span>El resumen indica cuántas autorizaciones están vigentes y cuántas tienen certificado nuevo.</span></div>
+<div id="cap9_0" class="cap" data-start="50.836" data-duration="3.864" data-track-index="3"><span>Las alertas avisan de lo vencido, lo por vencer y las fechas de la hoja que no</span></div>
+<div id="cap9_1" class="cap" data-start="54.7" data-duration="1.587" data-track-index="3"><span>coinciden con el certificado.</span></div>
+<div id="cap10_0" class="cap" data-start="56.587" data-duration="3.344" data-track-index="3"><span>Abajo, cada riesgo crítico es una tarjeta: A,</span></div>
+<div id="cap10_1" class="cap" data-start="59.931" data-duration="2.602" data-track-index="3"><span>autorizado, o C, solo capacitado.</span></div>
+<div id="cap11_0" class="cap" data-start="62.833" data-duration="2.38" data-track-index="3"><span>Si la fecha de la hoja difiere del certificado,</span></div>
+<div id="cap11_1" class="cap" data-start="65.213" data-duration="2.733" data-track-index="3"><span>el botón Usar aplica la fecha correcta con un clic.</span></div>
+<div id="cap12_0" class="cap" data-start="69.346" data-duration="3.31" data-track-index="3"><span>Cuando todo esté revisado, pulsa Renovar autorizaciones.</span></div>
+<div id="cap13_0" class="cap" data-start="72.956" data-duration="3.557" data-track-index="3"><span>La app escribe la fila en Google Sheets, aplicando la regla de las A:</span></div>
+<div id="cap13_1" class="cap" data-start="76.512" data-duration="2.728" data-track-index="3"><span>se mantiene lo que la persona ya tenía autorizado.</span></div>
+<div id="cap14_0" class="cap" data-start="79.54" data-duration="3.828" data-track-index="3"><span>En Drive crea la carpeta de cada persona, con sus certificados vigentes,</span></div>
+<div id="cap14_1" class="cap" data-start="83.368" data-duration="2.543" data-track-index="3"><span>el fotocheck nuevo y el Word de autorización.</span></div>
+<div id="cap15_0" class="cap" data-start="86.211" data-duration="5.456" data-track-index="3"><span>Si la carpeta ya existe, se reutiliza: puedes volver a correr la renovación sin duplicar archivos.</span></div>
+<div id="cap16_0" class="cap" data-start="93.067" data-duration="1.283" data-track-index="3"><span>Veamos el fotocheck.</span></div>
+<div id="cap17_0" class="cap" data-start="95.749" data-duration="2.698" data-track-index="3"><span>El botón Ver fotocheck abre la tarjeta de la persona.</span></div>
+<div id="cap18_0" class="cap" data-start="98.747" data-duration="6.087" data-track-index="3"><span>Se dibuja sola: foto, datos, examen médico y la grilla de los dieciocho riesgos con su vencimiento.</span></div>
+<div id="cap19_0" class="cap" data-start="105.134" data-duration="3.55" data-track-index="3"><span>La A sombreada indica autorizado y la C, capacitado.</span></div>
+<div id="cap19_1" class="cap" data-start="108.684" data-duration="3.086" data-track-index="3"><span>Al pie, si la persona está autorizada o no.</span></div>
+<div id="cap20_0" class="cap" data-start="112.07" data-duration="4.145" data-track-index="3"><span>Puedes descargarla como imagen o como Word, con el fotocheck nuevo y el antiguo.</span></div>
+<div id="cap21_0" class="cap" data-start="117.615" data-duration="2.304" data-track-index="3"><span>Ahora, la pestaña Certificados.</span></div>
+<div id="cap22_0" class="cap" data-start="121.319" data-duration="3.348" data-track-index="3"><span>Escribe uno o varios DNI y pulsa Iniciar extracción.</span></div>
+<div id="cap23_0" class="cap" data-start="124.967" data-duration="4.254" data-track-index="3"><span>La app busca los certificados de cada persona en todas tus fuentes configuradas.</span></div>
+<div id="cap24_0" class="cap" data-start="129.52" data-duration="3.554" data-track-index="3"><span>Al terminar, Descargar ZIP te entrega los certificados ordenados,</span></div>
+<div id="cap24_1" class="cap" data-start="133.075" data-duration="1.681" data-track-index="3"><span>con una carpeta por persona.</span></div>
+<div id="cap25_0" class="cap" data-start="135.056" data-duration="4.52" data-track-index="3"><span>Y como un lote puede tardar, te avisa al finalizar con una notificación y un sonido.</span></div>
+<div id="cap26_0" class="cap" data-start="140.976" data-duration="2.971" data-track-index="3"><span>Para dar de alta a una persona, usa Nuevo personal.</span></div>
+<div id="cap27_0" class="cap" data-start="145.347" data-duration="6.766" data-track-index="3"><span>Escribe el DNI. Si la persona ya existe, la app rellena sus datos y te avisa, para no duplicarla.</span></div>
+<div id="cap28_0" class="cap" data-start="152.413" data-duration="2.825" data-track-index="3"><span>Completa nombres, empresa, cargo y área.</span></div>
+<div id="cap29_0" class="cap" data-start="155.538" data-duration="4.066" data-track-index="3"><span>Según el cargo, la matriz por puesto propone qué riesgos van autorizados.</span></div>
+<div id="cap30_0" class="cap" data-start="159.904" data-duration="4.784" data-track-index="3"><span>Pulsa Dar de alta y renovar, y la persona queda registrada con su carpeta y su fotocheck.</span></div>
+<div id="cap31_0" class="cap" data-start="166.088" data-duration="2.929" data-track-index="3"><span>Las siguientes pestañas te dan el control de todo el personal.</span></div>
+<div id="cap32_0" class="cap" data-start="170.417" data-duration="2.932" data-track-index="3"><span>En Estado RRCC, pulsa Cargar personal y verás,</span></div>
+<div id="cap32_1" class="cap" data-start="173.349" data-duration="4.102" data-track-index="3"><span>por cada riesgo, quién está vigente, por actualizar o vencido.</span></div>
+<div id="cap33_0" class="cap" data-start="177.751" data-duration="3.312" data-track-index="3"><span>Filtra por riesgo, por estado o por fecha de vencimiento.</span></div>
+<div id="cap34_0" class="cap" data-start="181.363" data-duration="2.187" data-track-index="3"><span>Y lleva el resultado a impresión o a Excel.</span></div>
+<div id="cap35_0" class="cap" data-start="184.949" data-duration="3.776" data-track-index="3"><span>Estado total resume a las personas con algún riesgo vencido o por vencer,</span></div>
+<div id="cap35_1" class="cap" data-start="188.726" data-duration="1.65" data-track-index="3"><span>empezando por lo más urgente.</span></div>
+<div id="cap36_0" class="cap" data-start="190.676" data-duration="2.782" data-track-index="3"><span>Puedes exportarlo a PDF, Excel o imagen.</span></div>
+<div id="cap37_0" class="cap" data-start="193.758" data-duration="3.098" data-track-index="3"><span>Y en Exportación obtienes la lista de autorizados vigentes,</span></div>
+<div id="cap37_1" class="cap" data-start="196.855" data-duration="1.778" data-track-index="3"><span>con un ZIP de sus certificados.</span></div>
+<div id="cap38_0" class="cap" data-start="200.033" data-duration="2.574" data-track-index="3"><span>Ver RRCC muestra el fotocheck de cada persona,</span></div>
+<div id="cap38_1" class="cap" data-start="202.608" data-duration="1.605" data-track-index="3"><span>tal como queda en la hoja.</span></div>
+<div id="cap39_0" class="cap" data-start="204.513" data-duration="3.48" data-track-index="3"><span>Filtra por estado, guardia, cargo, área o riesgo.</span></div>
+<div id="cap40_0" class="cap" data-start="208.293" data-duration="3.107" data-track-index="3"><span>Y descarga todos los fotochecks o los certificados en un ZIP.</span></div>
+<div id="cap41_0" class="cap" data-start="212.8" data-duration="1.568" data-track-index="3"><span>Unos consejos finales.</span></div>
+<div id="cap42_0" class="cap" data-start="214.668" data-duration="1.888" data-track-index="3"><span>Consulta siempre antes de renovar.</span></div>
+<div id="cap43_0" class="cap" data-start="216.856" data-duration="2.832" data-track-index="3"><span>Atiende las alertas de vencidos y fechas distintas.</span></div>
+<div id="cap44_0" class="cap" data-start="219.988" data-duration="1.924" data-track-index="3"><span>Mantén al día la matriz por puesto.</span></div>
+<div id="cap45_0" class="cap" data-start="222.212" data-duration="2.308" data-track-index="3"><span>Y revisa el estado total cada semana.</span></div>
+<div id="cap46_0" class="cap" data-start="225.92" data-duration="6.211" data-track-index="3"><span>¡Listo! Ya sabes usar Riesgos Críticos. Tus autorizaciones, siempre al día.</span></div>
+<audio id="vo0" src="assets/vo/0.mp3" data-start="0.55" data-duration="2.262" data-track-index="4" data-volume="1"></audio>
+<audio id="vo1" src="assets/vo/1.mp3" data-start="3.262" data-duration="6.088" data-track-index="4" data-volume="1"></audio>
+<audio id="vo2" src="assets/vo/2.mp3" data-start="10.9" data-duration="3.965" data-track-index="4" data-volume="1"></audio>
+<audio id="vo3" src="assets/vo/3.mp3" data-start="16.415" data-duration="1.909" data-track-index="4" data-volume="1"></audio>
+<audio id="vo4" src="assets/vo/4.mp3" data-start="19.874" data-duration="6.218" data-track-index="4" data-volume="1"></audio>
+<audio id="vo5" src="assets/vo/5.mp3" data-start="26.542" data-duration="4.476" data-track-index="4" data-volume="1"></audio>
+<audio id="vo6" src="assets/vo/6.mp3" data-start="31.467" data-duration="7.285" data-track-index="4" data-volume="1"></audio>
+<audio id="vo7" src="assets/vo/7.mp3" data-start="40.302" data-duration="5.167" data-track-index="4" data-volume="1"></audio>
+<audio id="vo8" src="assets/vo/8.mp3" data-start="45.919" data-duration="4.467" data-track-index="4" data-volume="1"></audio>
+<audio id="vo9" src="assets/vo/9.mp3" data-start="50.836" data-duration="5.301" data-track-index="4" data-volume="1"></audio>
+<audio id="vo10" src="assets/vo/10.mp3" data-start="56.587" data-duration="5.795" data-track-index="4" data-volume="1"></audio>
+<audio id="vo11" src="assets/vo/11.mp3" data-start="62.833" data-duration="4.963" data-track-index="4" data-volume="1"></audio>
+<audio id="vo12" src="assets/vo/12.mp3" data-start="69.346" data-duration="3.16" data-track-index="4" data-volume="1"></audio>
+<audio id="vo13" src="assets/vo/13.mp3" data-start="72.956" data-duration="6.135" data-track-index="4" data-volume="1"></audio>
+<audio id="vo14" src="assets/vo/14.mp3" data-start="79.54" data-duration="6.221" data-track-index="4" data-volume="1"></audio>
+<audio id="vo15" src="assets/vo/15.mp3" data-start="86.211" data-duration="5.306" data-track-index="4" data-volume="1"></audio>
+<audio id="vo16" src="assets/vo/16.mp3" data-start="93.067" data-duration="1.133" data-track-index="4" data-volume="1"></audio>
+<audio id="vo17" src="assets/vo/17.mp3" data-start="95.749" data-duration="2.548" data-track-index="4" data-volume="1"></audio>
+<audio id="vo18" src="assets/vo/18.mp3" data-start="98.747" data-duration="5.937" data-track-index="4" data-volume="1"></audio>
+<audio id="vo19" src="assets/vo/19.mp3" data-start="105.134" data-duration="6.485" data-track-index="4" data-volume="1"></audio>
+<audio id="vo20" src="assets/vo/20.mp3" data-start="112.07" data-duration="3.995" data-track-index="4" data-volume="1"></audio>
+<audio id="vo21" src="assets/vo/21.mp3" data-start="117.615" data-duration="2.154" data-track-index="4" data-volume="1"></audio>
+<audio id="vo22" src="assets/vo/22.mp3" data-start="121.319" data-duration="3.198" data-track-index="4" data-volume="1"></audio>
+<audio id="vo23" src="assets/vo/23.mp3" data-start="124.967" data-duration="4.104" data-track-index="4" data-volume="1"></audio>
+<audio id="vo24" src="assets/vo/24.mp3" data-start="129.52" data-duration="5.086" data-track-index="4" data-volume="1"></audio>
+<audio id="vo25" src="assets/vo/25.mp3" data-start="135.056" data-duration="4.37" data-track-index="4" data-volume="1"></audio>
+<audio id="vo26" src="assets/vo/26.mp3" data-start="140.976" data-duration="2.821" data-track-index="4" data-volume="1"></audio>
+<audio id="vo27" src="assets/vo/27.mp3" data-start="145.347" data-duration="6.616" data-track-index="4" data-volume="1"></audio>
+<audio id="vo28" src="assets/vo/28.mp3" data-start="152.413" data-duration="2.675" data-track-index="4" data-volume="1"></audio>
+<audio id="vo29" src="assets/vo/29.mp3" data-start="155.538" data-duration="3.916" data-track-index="4" data-volume="1"></audio>
+<audio id="vo30" src="assets/vo/30.mp3" data-start="159.904" data-duration="4.634" data-track-index="4" data-volume="1"></audio>
+<audio id="vo31" src="assets/vo/31.mp3" data-start="166.088" data-duration="2.779" data-track-index="4" data-volume="1"></audio>
+<audio id="vo32" src="assets/vo/32.mp3" data-start="170.417" data-duration="6.884" data-track-index="4" data-volume="1"></audio>
+<audio id="vo33" src="assets/vo/33.mp3" data-start="177.751" data-duration="3.162" data-track-index="4" data-volume="1"></audio>
+<audio id="vo34" src="assets/vo/34.mp3" data-start="181.363" data-duration="2.037" data-track-index="4" data-volume="1"></audio>
+<audio id="vo35" src="assets/vo/35.mp3" data-start="184.949" data-duration="5.276" data-track-index="4" data-volume="1"></audio>
+<audio id="vo36" src="assets/vo/36.mp3" data-start="190.676" data-duration="2.632" data-track-index="4" data-volume="1"></audio>
+<audio id="vo37" src="assets/vo/37.mp3" data-start="193.758" data-duration="4.725" data-track-index="4" data-volume="1"></audio>
+<audio id="vo38" src="assets/vo/38.mp3" data-start="200.033" data-duration="4.03" data-track-index="4" data-volume="1"></audio>
+<audio id="vo39" src="assets/vo/39.mp3" data-start="204.513" data-duration="3.33" data-track-index="4" data-volume="1"></audio>
+<audio id="vo40" src="assets/vo/40.mp3" data-start="208.293" data-duration="2.957" data-track-index="4" data-volume="1"></audio>
+<audio id="vo41" src="assets/vo/41.mp3" data-start="212.8" data-duration="1.418" data-track-index="4" data-volume="1"></audio>
+<audio id="vo42" src="assets/vo/42.mp3" data-start="214.668" data-duration="1.738" data-track-index="4" data-volume="1"></audio>
+<audio id="vo43" src="assets/vo/43.mp3" data-start="216.856" data-duration="2.682" data-track-index="4" data-volume="1"></audio>
+<audio id="vo44" src="assets/vo/44.mp3" data-start="219.988" data-duration="1.774" data-track-index="4" data-volume="1"></audio>
+<audio id="vo45" src="assets/vo/45.mp3" data-start="222.212" data-duration="2.158" data-track-index="4" data-volume="1"></audio>
+<audio id="vo46" src="assets/vo/46.mp3" data-start="225.92" data-duration="6.061" data-track-index="4" data-volume="1"></audio>
+<audio id="music" src="assets/music.wav" data-start="0" data-duration="234.781" data-track-index="5" data-volume="0.09" data-fade-out="2"></audio>
+</div>
+<script>
+const tl = gsap.timeline({ paused: true });
+tl.fromTo("#s0 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},0.05);
+tl.to("#s0 .inner",{opacity:0,duration:0.35,ease:"power2.in"},9.97);
+tl.fromTo("#s0 .kicker",{opacity:0,y:16},{opacity:1,y:0,duration:0.5,ease:"power3.out"},0.1);
+tl.fromTo("#s0 .s0-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},0.2);
+tl.fromTo("#s0 .hero-ico",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},0.05);
+tl.fromTo("#s0 .sub",{opacity:0,y:20},{opacity:1,y:0,duration:0.6,ease:"power2.out"},0.75);
+tl.fromTo("#s1 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},10.4);
+tl.to("#s1 .inner",{opacity:0,duration:0.35,ease:"power2.in"},15.485);
+tl.fromTo("#s1 .kicker",{opacity:0,y:16},{opacity:1,y:0,duration:0.5,ease:"power3.out"},10.45);
+tl.fromTo("#s1 .s1-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},10.55);
+tl.fromTo("#s1 .s1-it:nth-child(1)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},11.3);
+tl.fromTo("#s1 .s1-it:nth-child(2)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},11.953);
+tl.fromTo("#s1 .s1-it:nth-child(3)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},12.606);
+tl.fromTo("#s1 .s1-it:nth-child(4)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},13.259);
+tl.fromTo("#s1 .s1-it:nth-child(5)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},13.912);
+tl.fromTo("#s1 .s1-it:nth-child(6)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},14.565);
+tl.fromTo("#s2 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},15.915);
+tl.to("#s2 .inner",{opacity:0,duration:0.35,ease:"power2.in"},18.944);
+tl.fromTo("#s2 .s2-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},16.065);
+tl.fromTo("#s2 .chapnum",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},15.915);
+tl.fromTo("#s3 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},19.374);
+tl.to("#s3 .inner",{opacity:0,duration:0.35,ease:"power2.in"},39.372);
+tl.fromTo("#s3 .s3-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},19.524);
+tl.fromTo("#s3 .s3-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},20.024);
+tl.fromTo("#s3 .s3-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},26.692);
+tl.fromTo("#s3 .s3-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},31.617);
+tl.fromTo("#s3 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},19.374);
+tl.fromTo("#s3 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},19.474);
+tl.set("#s3 .s3-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},19.324);
+tl.set("#s3 .s3-img0",{opacity:1},19.324);
+tl.to("#s3 .s3-z",{x:0,y:-41.786,scale:1.286,duration:1.0,ease:"power2.inOut"},19.724);
+tl.fromTo("#s3 .s3-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},20.624);
+tl.to("#s3 .s3-hl0",{opacity:0,duration:0.3},26.192);
+tl.to("#s3 .s3-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},31.317);
+tl.fromTo("#s4 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},39.802);
+tl.to("#s4 .inner",{opacity:0,duration:0.35,ease:"power2.in"},68.416);
+tl.fromTo("#s4 .s4-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},39.952);
+tl.fromTo("#s4 .s4-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},46.069);
+tl.fromTo("#s4 .s4-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},50.986);
+tl.fromTo("#s4 .s4-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},56.737);
+tl.fromTo("#s4 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},39.802);
+tl.fromTo("#s4 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},39.902);
+tl.set("#s4 .s4-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},39.752);
+tl.set("#s4 .s4-img0",{opacity:1},39.752);
+tl.to("#s4 .s4-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},40.152);
+tl.fromTo("#s4 .s4-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},41.052);
+tl.to("#s4 .s4-hl0",{opacity:0,duration:0.3},45.569);
+tl.fromTo("#s4 .s4-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},46.669);
+tl.to("#s4 .s4-hl1",{opacity:0,duration:0.3},50.486);
+tl.to("#s4 .s4-z",{x:0,y:-77.269,scale:2.3,duration:1.0,ease:"power2.inOut"},50.686);
+tl.fromTo("#s4 .s4-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},51.586);
+tl.to("#s4 .s4-hl2",{opacity:0,duration:0.3},56.237);
+tl.to("#s4 .s4-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},56.437);
+tl.fromTo("#s4 .s4-hl3",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},57.337);
+tl.to("#s4 .s4-hl3",{opacity:0,duration:0.3},62.483);
+tl.to("#s4 .s4-z",{x:-227.5,y:-292.5,scale:1.5,duration:1.0,ease:"power2.inOut"},62.683);
+tl.fromTo("#s4 .s4-hl4",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},63.583);
+tl.to("#s4 .s4-hl4",{opacity:0,duration:0.3},68.046);
+tl.fromTo("#s5 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},68.846);
+tl.to("#s5 .inner",{opacity:0,duration:0.35,ease:"power2.in"},92.137);
+tl.fromTo("#s5 .s5-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},68.996);
+tl.fromTo("#s5 .s5-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},73.106);
+tl.fromTo("#s5 .s5-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},79.69);
+tl.fromTo("#s5 .s5-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},86.361);
+tl.fromTo("#s5 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},68.846);
+tl.fromTo("#s5 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},68.946);
+tl.set("#s5 .s5-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},68.796);
+tl.set("#s5 .s5-img0",{opacity:1},68.796);
+tl.set("#s5 .s5-img1",{opacity:0},68.796);
+tl.set("#s5 .s5-img2",{opacity:0},68.796);
+tl.set("#s5 .s5-cur",{x:231,y:770.813,scale:1,opacity:0},68.796);
+tl.set("#s5 .s5-rip",{opacity:0},68.796);
+tl.fromTo("#s5 .s5-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},70.096);
+tl.to("#s5 .s5-hl0",{opacity:0,duration:0.3},72.606);
+tl.to("#s5 .s5-cur",{opacity:1,duration:0.25},69.546);
+tl.to("#s5 .s5-cur",{x:91,y:650.813,duration:0.75,ease:"power2.inOut"},69.596);
+tl.fromTo("#s5 .s5-rip",{x:61,y:620.813,scale:0.3,opacity:0.9},{scale:1.4,opacity:0,duration:0.6,ease:"power2.out"},70.396);
+tl.fromTo("#s5 .s5-cur",{scale:1},{scale:0.82,duration:0.12,yoyo:true,repeat:1},70.346);
+tl.to("#s5 .s5-img1",{opacity:1,duration:0.4,ease:"power1.inOut"},79.39);
+tl.to("#s5 .s5-img0",{opacity:0,duration:0.4,ease:"power1.inOut"},79.44);
+tl.fromTo("#s5 .s5-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},80.29);
+tl.to("#s5 .s5-hl2",{opacity:0,duration:0.3},85.861);
+tl.to("#s5 .s5-img2",{opacity:1,duration:0.4,ease:"power1.inOut"},86.061);
+tl.to("#s5 .s5-img1",{opacity:0,duration:0.4,ease:"power1.inOut"},86.111);
+tl.fromTo("#s5 .s5-hl3",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},86.961);
+tl.to("#s5 .s5-hl3",{opacity:0,duration:0.3},91.767);
+tl.fromTo("#s6 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},92.567);
+tl.to("#s6 .inner",{opacity:0,duration:0.35,ease:"power2.in"},94.819);
+tl.fromTo("#s6 .s6-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},92.717);
+tl.fromTo("#s6 .chapnum",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},92.567);
+tl.fromTo("#s7 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},95.249);
+tl.to("#s7 .inner",{opacity:0,duration:0.35,ease:"power2.in"},116.685);
+tl.fromTo("#s7 .s7-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},95.399);
+tl.fromTo("#s7 .s7-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},98.897);
+tl.fromTo("#s7 .s7-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},105.284);
+tl.fromTo("#s7 .s7-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},112.22);
+tl.fromTo("#s7 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},95.249);
+tl.fromTo("#s7 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},95.349);
+tl.set("#s7 .s7-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},95.199);
+tl.set("#s7 .s7-img0",{opacity:1},95.199);
+tl.set("#s7 .s7-img1",{opacity:0},95.199);
+tl.set("#s7 .s7-cur",{x:1101.188,y:241.875,scale:1,opacity:0},95.199);
+tl.set("#s7 .s7-rip",{opacity:0},95.199);
+tl.fromTo("#s7 .s7-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},96.499);
+tl.to("#s7 .s7-hl0",{opacity:0,duration:0.3},98.397);
+tl.to("#s7 .s7-cur",{opacity:1,duration:0.25},95.949);
+tl.to("#s7 .s7-cur",{x:961.188,y:121.875,duration:0.75,ease:"power2.inOut"},95.999);
+tl.fromTo("#s7 .s7-rip",{x:931.188,y:91.875,scale:0.3,opacity:0.9},{scale:1.4,opacity:0,duration:0.6,ease:"power2.out"},96.799);
+tl.fromTo("#s7 .s7-cur",{scale:1},{scale:0.82,duration:0.12,yoyo:true,repeat:1},96.749);
+tl.to("#s7 .s7-img1",{opacity:1,duration:0.4,ease:"power1.inOut"},98.597);
+tl.to("#s7 .s7-img0",{opacity:0,duration:0.4,ease:"power1.inOut"},98.647);
+tl.to("#s7 .s7-z",{x:-295.455,y:-166.193,scale:1.227,duration:1.0,ease:"power2.inOut"},98.597);
+tl.to("#s7 .s7-cur",{scale:0.815,duration:1.0,ease:"power2.inOut"},98.597);
+tl.fromTo("#s7 .s7-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},99.497);
+tl.to("#s7 .s7-hl1",{opacity:0,duration:0.3},104.784);
+tl.to("#s7 .s7-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},111.92);
+tl.to("#s7 .s7-cur",{scale:1,duration:1.0,ease:"power2.inOut"},111.92);
+tl.fromTo("#s7 .s7-hl3",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},112.82);
+tl.to("#s7 .s7-hl3",{opacity:0,duration:0.3},116.315);
+tl.fromTo("#s8 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},117.115);
+tl.to("#s8 .inner",{opacity:0,duration:0.35,ease:"power2.in"},120.389);
+tl.fromTo("#s8 .s8-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},117.265);
+tl.fromTo("#s8 .chapnum",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},117.115);
+tl.fromTo("#s9 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},120.819);
+tl.to("#s9 .inner",{opacity:0,duration:0.35,ease:"power2.in"},140.046);
+tl.fromTo("#s9 .s9-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},120.969);
+tl.fromTo("#s9 .s9-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},125.117);
+tl.fromTo("#s9 .s9-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},129.67);
+tl.fromTo("#s9 .s9-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},135.206);
+tl.fromTo("#s9 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},120.819);
+tl.fromTo("#s9 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},120.919);
+tl.set("#s9 .s9-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},120.769);
+tl.set("#s9 .s9-img0",{opacity:1},120.769);
+tl.set("#s9 .s9-img1",{opacity:0},120.769);
+tl.set("#s9 .s9-cur",{x:309,y:810.219,scale:1,opacity:0},120.769);
+tl.set("#s9 .s9-rip",{opacity:0},120.769);
+tl.fromTo("#s9 .s9-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},122.069);
+tl.to("#s9 .s9-hl0",{opacity:0,duration:0.3},124.617);
+tl.to("#s9 .s9-cur",{opacity:1,duration:0.25},121.519);
+tl.to("#s9 .s9-cur",{x:169,y:690.219,duration:0.75,ease:"power2.inOut"},121.569);
+tl.fromTo("#s9 .s9-rip",{x:139,y:660.219,scale:0.3,opacity:0.9},{scale:1.4,opacity:0,duration:0.6,ease:"power2.out"},122.369);
+tl.fromTo("#s9 .s9-cur",{scale:1},{scale:0.82,duration:0.12,yoyo:true,repeat:1},122.319);
+tl.to("#s9 .s9-img1",{opacity:1,duration:0.4,ease:"power1.inOut"},124.817);
+tl.to("#s9 .s9-img0",{opacity:0,duration:0.4,ease:"power1.inOut"},124.867);
+tl.fromTo("#s9 .s9-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},125.717);
+tl.to("#s9 .s9-hl1",{opacity:0,duration:0.3},129.17);
+tl.fromTo("#s9 .s9-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},130.27);
+tl.to("#s9 .s9-hl2",{opacity:0,duration:0.3},134.706);
+tl.to("#s9 .s9-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},134.906);
+tl.to("#s9 .s9-cur",{scale:1,duration:1.0,ease:"power2.inOut"},134.906);
+tl.fromTo("#s10 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},140.476);
+tl.to("#s10 .inner",{opacity:0,duration:0.35,ease:"power2.in"},144.417);
+tl.fromTo("#s10 .s10-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},140.626);
+tl.fromTo("#s10 .chapnum",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},140.476);
+tl.fromTo("#s11 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},144.847);
+tl.to("#s11 .inner",{opacity:0,duration:0.35,ease:"power2.in"},165.158);
+tl.fromTo("#s11 .s11-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},144.997);
+tl.fromTo("#s11 .s11-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},152.563);
+tl.fromTo("#s11 .s11-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},155.688);
+tl.fromTo("#s11 .s11-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},160.054);
+tl.fromTo("#s11 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},144.847);
+tl.fromTo("#s11 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},144.947);
+tl.set("#s11 .s11-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},144.797);
+tl.set("#s11 .s11-img0",{opacity:1},144.797);
+tl.set("#s11 .s11-cur",{x:307.375,y:809.813,scale:1,opacity:0},144.797);
+tl.set("#s11 .s11-rip",{opacity:0},144.797);
+tl.to("#s11 .s11-z",{x:0,y:0,scale:1.421,duration:1.0,ease:"power2.inOut"},145.197);
+tl.to("#s11 .s11-cur",{scale:0.704,duration:1.0,ease:"power2.inOut"},145.197);
+tl.fromTo("#s11 .s11-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},146.097);
+tl.to("#s11 .s11-hl0",{opacity:0,duration:0.3},152.063);
+tl.fromTo("#s11 .s11-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},153.163);
+tl.to("#s11 .s11-hl1",{opacity:0,duration:0.3},155.188);
+tl.to("#s11 .s11-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},155.388);
+tl.to("#s11 .s11-cur",{scale:1,duration:1.0,ease:"power2.inOut"},155.388);
+tl.fromTo("#s11 .s11-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},156.288);
+tl.to("#s11 .s11-hl2",{opacity:0,duration:0.3},159.554);
+tl.fromTo("#s11 .s11-hl3",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},160.654);
+tl.to("#s11 .s11-hl3",{opacity:0,duration:0.3},164.788);
+tl.to("#s11 .s11-cur",{opacity:1,duration:0.25},160.104);
+tl.to("#s11 .s11-cur",{x:167.375,y:689.813,duration:0.75,ease:"power2.inOut"},160.154);
+tl.fromTo("#s11 .s11-rip",{x:137.375,y:659.813,scale:0.3,opacity:0.9},{scale:1.4,opacity:0,duration:0.6,ease:"power2.out"},160.954);
+tl.fromTo("#s11 .s11-cur",{scale:1},{scale:0.82,duration:0.12,yoyo:true,repeat:1},160.904);
+tl.fromTo("#s12 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},165.588);
+tl.to("#s12 .inner",{opacity:0,duration:0.35,ease:"power2.in"},169.487);
+tl.fromTo("#s12 .s12-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},165.738);
+tl.fromTo("#s12 .chapnum",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},165.588);
+tl.fromTo("#s13 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},169.917);
+tl.to("#s13 .inner",{opacity:0,duration:0.35,ease:"power2.in"},184.019);
+tl.fromTo("#s13 .s13-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},170.067);
+tl.fromTo("#s13 .s13-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},170.567);
+tl.fromTo("#s13 .s13-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},177.901);
+tl.fromTo("#s13 .s13-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},181.513);
+tl.fromTo("#s13 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},169.917);
+tl.fromTo("#s13 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},170.017);
+tl.set("#s13 .s13-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},169.867);
+tl.set("#s13 .s13-img0",{opacity:1},169.867);
+tl.fromTo("#s13 .s13-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},171.167);
+tl.to("#s13 .s13-hl0",{opacity:0,duration:0.3},177.401);
+tl.to("#s13 .s13-z",{x:0,y:0,scale:1.08,duration:1.0,ease:"power2.inOut"},177.601);
+tl.fromTo("#s13 .s13-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},178.501);
+tl.to("#s13 .s13-hl1",{opacity:0,duration:0.3},181.013);
+tl.to("#s13 .s13-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},181.213);
+tl.fromTo("#s13 .s13-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},182.113);
+tl.to("#s13 .s13-hl2",{opacity:0,duration:0.3},183.649);
+tl.fromTo("#s14 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},184.449);
+tl.to("#s14 .inner",{opacity:0,duration:0.35,ease:"power2.in"},199.103);
+tl.fromTo("#s14 .s14-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},184.599);
+tl.fromTo("#s14 .s14-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},185.099);
+tl.fromTo("#s14 .s14-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},190.826);
+tl.fromTo("#s14 .s14-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},193.908);
+tl.fromTo("#s14 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},184.449);
+tl.fromTo("#s14 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},184.549);
+tl.set("#s14 .s14-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},184.399);
+tl.set("#s14 .s14-img0",{opacity:1},184.399);
+tl.set("#s14 .s14-img1",{opacity:0},184.399);
+tl.fromTo("#s14 .s14-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},185.699);
+tl.to("#s14 .s14-hl0",{opacity:0,duration:0.3},190.326);
+tl.fromTo("#s14 .s14-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},191.426);
+tl.to("#s14 .s14-hl1",{opacity:0,duration:0.3},193.408);
+tl.to("#s14 .s14-img1",{opacity:1,duration:0.4,ease:"power1.inOut"},193.608);
+tl.to("#s14 .s14-img0",{opacity:0,duration:0.4,ease:"power1.inOut"},193.658);
+tl.fromTo("#s14 .s14-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},194.508);
+tl.to("#s14 .s14-hl2",{opacity:0,duration:0.3},198.733);
+tl.fromTo("#s15 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},199.533);
+tl.to("#s15 .inner",{opacity:0,duration:0.35,ease:"power2.in"},211.87);
+tl.fromTo("#s15 .s15-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},199.683);
+tl.fromTo("#s15 .s15-b:nth-child(1)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},200.183);
+tl.fromTo("#s15 .s15-b:nth-child(2)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},204.663);
+tl.fromTo("#s15 .s15-b:nth-child(3)",{opacity:0,x:-24},{opacity:1,x:0,duration:0.45,ease:"power3.out"},208.443);
+tl.fromTo("#s15 .stepb",{opacity:0,scale:0.7},{opacity:1,scale:1,duration:0.5,ease:"back.out(1.7)"},199.533);
+tl.fromTo("#s15 .device",{opacity:0,y:60,rotationX:8,transformPerspective:1600},{opacity:1,y:0,rotationX:0,duration:0.9,ease:"power3.out"},199.633);
+tl.set("#s15 .s15-z",{x:0,y:0,scale:1,transformOrigin:"0 0"},199.483);
+tl.set("#s15 .s15-img0",{opacity:1},199.483);
+tl.to("#s15 .s15-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},199.883);
+tl.fromTo("#s15 .s15-hl0",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},200.783);
+tl.to("#s15 .s15-hl0",{opacity:0,duration:0.3},204.163);
+tl.to("#s15 .s15-z",{x:0,y:0,scale:1,duration:1.0,ease:"power2.inOut"},204.363);
+tl.fromTo("#s15 .s15-hl1",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},205.263);
+tl.to("#s15 .s15-hl1",{opacity:0,duration:0.3},207.943);
+tl.fromTo("#s15 .s15-hl2",{opacity:0},{opacity:1,duration:0.4,ease:"power2.out"},209.043);
+tl.to("#s15 .s15-hl2",{opacity:0,duration:0.3},211.5);
+tl.fromTo("#s16 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},212.3);
+tl.to("#s16 .inner",{opacity:0,duration:0.35,ease:"power2.in"},224.99);
+tl.fromTo("#s16 .kicker",{opacity:0,y:16},{opacity:1,y:0,duration:0.5,ease:"power3.out"},212.35);
+tl.fromTo("#s16 .s16-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},212.45);
+tl.fromTo("#s16 .s16-it:nth-child(1)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},214.818);
+tl.fromTo("#s16 .s16-it:nth-child(2)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},217.006);
+tl.fromTo("#s16 .s16-it:nth-child(3)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},220.138);
+tl.fromTo("#s16 .s16-it:nth-child(4)",{opacity:0,y:40,scale:0.96},{opacity:1,y:0,scale:1,duration:0.55,ease:"power3.out"},222.362);
+tl.fromTo("#s17 .inner",{opacity:0},{opacity:1,duration:0.45,ease:"power2.out"},225.42);
+tl.to("#s17 .inner",{opacity:0,duration:0.35,ease:"power2.in"},234.101);
+tl.fromTo("#s17 .s17-tw",{opacity:0,y:34},{opacity:1,y:0,duration:0.55,stagger:0.06,ease:"power3.out"},225.57);
+tl.fromTo("#s17 .hero-ico",{opacity:0,scale:0.6},{opacity:1,scale:1,duration:0.7,ease:"back.out(1.7)"},225.42);
+tl.fromTo("#s17 .sub",{opacity:0,y:20},{opacity:1,y:0,duration:0.6,ease:"power2.out"},226.12);
+tl.fromTo("#cap0_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},0.55);
+tl.fromTo("#cap1_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},3.262);
+tl.fromTo("#cap1_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},6.531);
+tl.fromTo("#cap2_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},10.9);
+tl.fromTo("#cap3_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},16.415);
+tl.fromTo("#cap4_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},19.874);
+tl.fromTo("#cap4_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},23.563);
+tl.fromTo("#cap5_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},26.542);
+tl.fromTo("#cap5_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},29.724);
+tl.fromTo("#cap6_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},31.467);
+tl.fromTo("#cap6_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},34.692);
+tl.fromTo("#cap7_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},40.302);
+tl.fromTo("#cap7_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},43.362);
+tl.fromTo("#cap8_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},45.919);
+tl.fromTo("#cap9_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},50.836);
+tl.fromTo("#cap9_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},54.7);
+tl.fromTo("#cap10_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},56.587);
+tl.fromTo("#cap10_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},59.931);
+tl.fromTo("#cap11_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},62.833);
+tl.fromTo("#cap11_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},65.213);
+tl.fromTo("#cap12_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},69.346);
+tl.fromTo("#cap13_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},72.956);
+tl.fromTo("#cap13_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},76.512);
+tl.fromTo("#cap14_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},79.54);
+tl.fromTo("#cap14_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},83.368);
+tl.fromTo("#cap15_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},86.211);
+tl.fromTo("#cap16_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},93.067);
+tl.fromTo("#cap17_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},95.749);
+tl.fromTo("#cap18_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},98.747);
+tl.fromTo("#cap19_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},105.134);
+tl.fromTo("#cap19_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},108.684);
+tl.fromTo("#cap20_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},112.07);
+tl.fromTo("#cap21_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},117.615);
+tl.fromTo("#cap22_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},121.319);
+tl.fromTo("#cap23_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},124.967);
+tl.fromTo("#cap24_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},129.52);
+tl.fromTo("#cap24_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},133.075);
+tl.fromTo("#cap25_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},135.056);
+tl.fromTo("#cap26_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},140.976);
+tl.fromTo("#cap27_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},145.347);
+tl.fromTo("#cap28_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},152.413);
+tl.fromTo("#cap29_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},155.538);
+tl.fromTo("#cap30_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},159.904);
+tl.fromTo("#cap31_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},166.088);
+tl.fromTo("#cap32_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},170.417);
+tl.fromTo("#cap32_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},173.349);
+tl.fromTo("#cap33_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},177.751);
+tl.fromTo("#cap34_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},181.363);
+tl.fromTo("#cap35_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},184.949);
+tl.fromTo("#cap35_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},188.726);
+tl.fromTo("#cap36_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},190.676);
+tl.fromTo("#cap37_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},193.758);
+tl.fromTo("#cap37_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},196.855);
+tl.fromTo("#cap38_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},200.033);
+tl.fromTo("#cap38_1 span",{opacity:0,y:0},{opacity:1,y:0,duration:0.12,ease:"power2.out"},202.608);
+tl.fromTo("#cap39_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},204.513);
+tl.fromTo("#cap40_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},208.293);
+tl.fromTo("#cap41_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},212.8);
+tl.fromTo("#cap42_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},214.668);
+tl.fromTo("#cap43_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},216.856);
+tl.fromTo("#cap44_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},219.988);
+tl.fromTo("#cap45_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},222.212);
+tl.fromTo("#cap46_0 span",{opacity:0,y:12},{opacity:1,y:0,duration:0.25,ease:"power2.out"},225.92);
+tl.fromTo(".blob1",{x:-120,y:-60},{x:160,y:90,duration:234.781,ease:"sine.inOut"},0);
+tl.fromTo(".blob2",{x:140,y:80},{x:-160,y:-70,duration:234.781,ease:"sine.inOut"},0);
+window.__timelines["main"] = tl;
+</script>
+</body>
+</html>
