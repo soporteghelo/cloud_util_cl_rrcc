@@ -227,3 +227,9 @@ test("trozos: cada texto con su color y letra chica; lo que no entra se corta", 
   assert.ok(cortado.includes("\x85) Tj"), "el trozo largo termina en puntos suspensivos");
   assert.ok(!cortado.includes("(FIN) Tj"), "lo que viene despues del corte no se dibuja");
 });
+
+test("la banda de area sale en el PDF, con su detalle a la derecha", async () => {
+  const { crudo } = await texto([[{ tipo: "area", texto: "AVANCES", derecha: "2 persona(s)" }, ...BLOQUE]]);
+  assert.match(crudo, /\(AVANCES\)/);
+  assert.match(crudo, /\(2 persona\\\(s\\\)\)/);
+});

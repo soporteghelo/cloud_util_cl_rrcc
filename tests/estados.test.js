@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  porArea,
   normalizarDocumento,
   aIso,
   serialAIso,
@@ -942,4 +943,27 @@ test("verificarRiesgo: un curso 'Desaprobado' de JOMISER no da vigencia", () => 
   assert.equal(v.fila[colCap("ES")], "2025-10-01", "la fecha de la hoja no se toca");
   // el curso aprobado del mismo dia si cuenta para su riesgo
   assert.equal(verificarRiesgo({ fila, items, codigo: "PM", hoy: "2026-10-24", diccionario: dic }).cap, "2026-10-23");
+});
+
+test("porArea: de la A a la Z, sin importar mayusculas, con lo que no es un area al final", () => {
+  const fila = (dni, area) => ({ persona: { dni, area } });
+  const grupos = porArea([
+    fila("1", "SERVICIOS"),
+    fila("2", ""),
+    fila("3", " avances "),
+    fila("4", "S/A"),
+    fila("5", "#N/A"),
+    fila("6", "Servicios"),
+    fila("7", "AVANCES"),
+  ]);
+  assert.deepEqual(
+    grupos.map((g) => [g.rotulo, g.filas.map((f) => f.persona.dni)]),
+    [
+      ["AVANCES", ["3", "7"]],
+      ["SERVICIOS", ["1", "6"]],
+      ["SIN ÁREA (S/A)", ["4"]],
+      ["ÁREA CON ERROR EN LA HOJA (#N/A)", ["5"]],
+      ["ÁREA NO REGISTRADA EN LA HOJA", ["2"]],
+    ]
+  );
 });

@@ -25,7 +25,7 @@ const MARGEN = { izq: 40, der: 40, arriba: 44, abajo: 44 };
 const ANCHO_UTIL = PAGINA.ancho - MARGEN.izq - MARGEN.der;
 
 /** Alto de cada tipo de parte, para saber cuando se acaba la hoja. */
-const ALTO = { titulo: 16, cabecera: 25, nota: 12, grupo: 15, item: 13, regla: 10 };
+const ALTO = { titulo: 16, area: 31, cabecera: 25, nota: 12, grupo: 15, item: 13, regla: 10 };
 
 /** Paleta del informe. Los colores van en 0..1, como los quiere el PDF. */
 export const COLOR = {
@@ -225,6 +225,7 @@ function numerarHojas(paginas, hoja, izquierda) {
  *
  * Partes admitidas:
  *   { tipo: "titulo",   texto }
+ *   { tipo: "area",     texto, derecha }                 banda de color que abre un grupo de personas
  *   { tipo: "cabecera", texto, derecha, indice, color }  nombre sobre banda
  *   { tipo: "nota",     texto }                          renglon gris pequeño
  *   { tipo: "grupo",    texto, color }                   subtitulo de grupo
@@ -252,6 +253,19 @@ export async function armarPdf({ titulo = "", subtitulo = "", bloques = [] } = {
       case "titulo":
         ops.push(opTexto(recortar(parte.texto, 11.5, ANCHO_UTIL, true), MARGEN.izq, y - 11, 11.5, { negrita: true }));
         break;
+
+      case "area": {
+        const alto = ALTO.area - 8;
+        const blanco = [1, 1, 1];
+        ops.push(opRecuadro(MARGEN.izq, y - alto, ANCHO_UTIL, alto, COLOR.acento));
+        const anchoDerecha = parte.derecha ? anchoTexto(parte.derecha, 9, true) : 0;
+        const hueco = ANCHO_UTIL - 20 - (anchoDerecha ? anchoDerecha + 14 : 0);
+        ops.push(opTexto(recortar(parte.texto, 13, hueco, true), MARGEN.izq + 10, y - alto + 7, 13, { negrita: true, color: blanco }));
+        if (parte.derecha) {
+          ops.push(opTexto(parte.derecha, PAGINA.ancho - MARGEN.der - anchoDerecha - 10, y - alto + 7.5, 9, { negrita: true, color: blanco }));
+        }
+        break;
+      }
 
       case "cabecera": {
         // banda gris de lado a lado con una pestaña de color a la izquierda:
@@ -332,7 +346,8 @@ export async function armarPdf({ titulo = "", subtitulo = "", bloques = [] } = {
     if (y - alto < MARGEN.abajo && alto <= util) nuevaPagina();
     for (const parte of partes) {
       // un titulo de grupo nunca se queda solo al pie: se lleva su primera fila
-      const necesita = (ALTO[parte.tipo] || 0) + (parte.tipo === "grupo" ? ALTO.item : 0);
+      // y la banda de un area, a su primera persona
+      const necesita = (ALTO[parte.tipo] || 0) + (parte.tipo === "grupo" ? ALTO.item : parte.tipo === "area" ? ALTO.cabecera : 0);
       if (y - necesita < MARGEN.abajo) nuevaPagina();
       dibujar(parte);
     }

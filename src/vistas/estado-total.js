@@ -29,7 +29,8 @@ import {
 import { armarXlsx } from "../lib/excel.js";
 import { armarPdf, armarPdfTabla, COLOR } from "../lib/pdf.js";
 import { armarPngTabla, TINTA } from "../lib/imagen.js";
-import { riesgosProblemaDe, aFormatoCorto, hoyIso } from "../../shared/estados.js";
+import { abrirVisorPdf } from "./visor-pdf.js";
+import { riesgosProblemaDe, porArea, aFormatoCorto, hoyIso } from "../../shared/estados.js";
 import { porCodigo } from "../../shared/rrcc.js";
 
 /**
@@ -49,7 +50,7 @@ const TITULO_INFORME = "ESTADO TOTAL · RRCC VENCIDOS POR PERSONA";
 
 const tipoDe = (riesgo) => (riesgo.tipo === "A" || riesgo.tipo === "C" ? riesgo.tipo : "");
 
-/** Mismo codigo de color en la vista previa (CSS) y en el PDF. */
+/** Color de cada tipo en el PDF. */
 const COLOR_TIPO = { A: COLOR.rojo, C: COLOR.ambar, "": COLOR.gris };
 
 /** El nombre largo del RRCC sale del catalogo: la hoja en vivo devuelve el codigo. */
@@ -209,12 +210,6 @@ export function montarEstadoTotal() {
     buscar: $("et-buscar"),
     orden: $("et-orden"),
     cargar: $("et-cargar"),
-    previaModal: $("et-previa-modal"),
-    previaCuerpo: $("et-previa-cuerpo"),
-    previaCount: $("et-previa-count"),
-    previaCerrar: $("et-previa-cerrar"),
-    previaImprimir: $("et-previa-imprimir"),
-    previaDescargar: $("et-previa-descargar"),
     pdf: $("et-pdf"),
     excel: $("et-excel"),
     count: $("et-count"),
@@ -360,83 +355,6 @@ export function montarEstadoTotal() {
   }
 
   /* ------------------------------------------------------------------ */
-  /* Informe (vista previa de lo que se imprime y se exporta)            */
-  /* ------------------------------------------------------------------ */
-
-  const CLASE_TIPO = { A: "et-inf-a", C: "et-inf-c", "": "et-inf-x" };
-
-  /**
-   * El informe que se ve en pantalla es EL MISMO que sale por la impresora y
-   * el que se vuelca al PDF: misma gente, mismo orden (por apellidos) y mismos
-   * grupos A/C. Asi no hace falta imprimir para saber que va a salir.
-   */
-  function informeHtml(lista) {
-    return lista
-      .map(({ persona, vencidos, porVencer }, i) => {
-        const grupos = vencidosPorTipo(vencidos)
-          .map(
-            (g) =>
-              `<div class="et-inf-grupo ${CLASE_TIPO[g.tipo] || "et-inf-x"}">` +
-              `<b>${g.rotulo} (${g.items.length})</b>` +
-              `<table><tbody>` +
-              g.items
-                .map(
-                  (r) =>
-                    `<tr><td class="et-inf-cod">${escaparHtml(r.codigo)}</td>` +
-                    `<td>${escaparHtml(nombreRiesgo(r))}</td>` +
-                    `<td class="et-inf-fecha">${aFormatoCorto(r.venc) || "—"}</td>` +
-                    `<td class="et-inf-dias">${escaparHtml(textoDias(r.dias))}</td></tr>`
-                )
-                .join("") +
-              `</tbody></table></div>`
-          )
-          .join("");
-
-        return (
-          `<article class="et-inf-persona">` +
-          `<header><b><span class="et-inf-n">${i + 1}.</span>${escaparHtml(persona.nombreCompleto) || "—"}</b>` +
-          `<span>DNI ${escaparHtml(persona.dni) || "—"}</span></header>` +
-          `<div class="et-inf-sub">${escaparHtml(cargoArea(persona)) || "sin cargo ni área"} · ` +
-          `${vencidos.length} vencido(s) · ${porVencer.length} por vencer</div>` +
-          (grupos || `<div class="et-inf-vacio">sin RRCC vencidos</div>`) +
-          `</article>`
-        );
-      })
-      .join("");
-  }
-
-  /**
-   * El informe no entra en la vista (ahi manda la tabla resumen): se enseña en
-   * un flotante antes de bajar el PDF, para no tener que abrir el archivo solo
-   * para comprobar que sale lo que se espera. Desde ahi se descarga o se
-   * imprime, y lo impreso es exactamente esto.
-   */
-  function abrirPrevia() {
-    const lista = porApellidos();
-    if (!lista.length) return;
-    // el encabezado solo se ve al imprimir (en pantalla ya esta el del
-    // flotante), y dice lo mismo que la cabecera del PDF
-    el.previaCuerpo.innerHTML =
-      `<div class="et-inf-cabecera"><b>${TITULO_INFORME}</b>` +
-      `<span>${escaparHtml(subtituloInforme(lista))}</span></div>` +
-      informeHtml(lista);
-    el.previaCount.textContent = `${lista.length} persona(s) · ordenado por apellidos`;
-    el.previaModal.hidden = false;
-    el.previaCuerpo.scrollTop = 0;
-    document.addEventListener("keydown", alEscapePrevia, true);
-  }
-
-  function cerrarPrevia() {
-    el.previaModal.hidden = true;
-    el.previaCuerpo.innerHTML = "";
-    document.removeEventListener("keydown", alEscapePrevia, true);
-  }
-
-  function alEscapePrevia(ev) {
-    if (ev.key === "Escape") cerrarPrevia();
-  }
-
-  /* ------------------------------------------------------------------ */
   /* Tabla + dashboard                                                   */
   /* ------------------------------------------------------------------ */
 
@@ -476,7 +394,6 @@ export function montarEstadoTotal() {
 
   function pintar() {
     cerrarFlotante();
-    if (!el.previaModal.hidden) cerrarPrevia(); // lo que se veia ya no coincide con el filtro
     const textoFiltro = el.buscar.value.trim().toUpperCase();
     const normalizar = (valor) => String(valor ?? "").trim().toUpperCase();
     const umbrales = {
@@ -553,7 +470,7 @@ export function montarEstadoTotal() {
   /**
    * Lo mismo que se ve en pantalla (mismos filtros), pero ordenado por
    * apellidos: en pantalla manda la urgencia, y para repartir el informe
-   * manda el orden alfabetico.
+   * manda el orden alfabetico (dentro de cada area, en el PDF).
    */
   const porApellidos = () =>
     [...filas].sort((a, b) =>
@@ -571,72 +488,96 @@ export function montarEstadoTotal() {
     const tipos = textoTipos();
     return (
       `${lista.length} persona(s) activa(s) con al menos un RRCC vencido · ` +
-      `ordenado por apellidos · ${aFormatoCorto(hoyIso())}` +
+      `por área y apellidos · ${aFormatoCorto(hoyIso())}` +
       (tipos ? ` · ${tipos}` : "") +
       (filtro ? ` · filtro: ${filtro.toUpperCase()}` : "")
     );
   }
 
-  async function exportarPdf() {
+  /** Lo que ocupa una persona en el informe: su banda y sus vencidos, sin partirse entre hojas. */
+  function bloquePersona({ persona, vencidos, porVencer }, indice) {
+    const partes = [
+      {
+        tipo: "cabecera",
+        indice,
+        texto: persona.nombreCompleto || "—",
+        derecha: `DNI ${persona.dni || "—"}`,
+      },
+      {
+        tipo: "nota",
+        texto:
+          (cargoArea(persona) || "sin cargo ni área") +
+          ` · ${vencidos.length} vencido(s) · ${porVencer.length} por vencer`,
+      },
+    ];
+    for (const grupo of vencidosPorTipo(vencidos)) {
+      partes.push({
+        tipo: "grupo",
+        texto: `${grupo.rotulo} (${grupo.items.length})`,
+        color: COLOR_TIPO[grupo.tipo] || COLOR.gris,
+      });
+      // fondo alterno: con ocho o diez vencimientos seguidos, la vista se
+      // pierde de columna a columna sin una guia
+      grupo.items.forEach((r, n) => {
+        partes.push({
+          tipo: "item",
+          fondo: n % 2 === 1,
+          cols: [
+            { texto: r.codigo, x: 18, ancho: 34, negrita: true },
+            { texto: nombreRiesgo(r), x: 56, ancho: 230 },
+            { texto: aFormatoCorto(r.venc) || "—", x: 292, ancho: 72 },
+            { texto: textoDias(r.dias), x: 370, ancho: 145, color: COLOR.gris },
+          ],
+        });
+      });
+    }
+    if (!vencidos.length) partes.push({ tipo: "nota", texto: "sin RRCC vencidos" });
+    partes.push({ tipo: "espacio", alto: 6 });
+    return partes;
+  }
+
+  /**
+   * El informe en PDF, repartido por area, se abre en el visor: primero se ve
+   * y desde ahi se descarga. La numeracion vuelve a 1 en cada area.
+   */
+  async function verPdf() {
     const lista = porApellidos();
     if (!lista.length) return;
 
-    const bloques = lista.map(({ persona, vencidos, porVencer }, i) => {
-      const partes = [
-        {
-          tipo: "cabecera",
-          indice: i + 1,
-          texto: persona.nombreCompleto || "—",
-          derecha: `DNI ${persona.dni || "—"}`,
-        },
-        {
-          tipo: "nota",
-          texto:
-            (cargoArea(persona) || "sin cargo ni área") +
-            ` · ${vencidos.length} vencido(s) · ${porVencer.length} por vencer`,
-        },
-      ];
-      for (const grupo of vencidosPorTipo(vencidos)) {
-        partes.push({
-          tipo: "grupo",
-          texto: `${grupo.rotulo} (${grupo.items.length})`,
-          color: COLOR_TIPO[grupo.tipo] || COLOR.gris,
-        });
-        // fondo alterno: con ocho o diez vencimientos seguidos, la vista se
-        // pierde de columna a columna sin una guia
-        grupo.items.forEach((r, n) => {
-          partes.push({
-            tipo: "item",
-            fondo: n % 2 === 1,
-            cols: [
-              { texto: r.codigo, x: 18, ancho: 34, negrita: true },
-              { texto: nombreRiesgo(r), x: 56, ancho: 230 },
-              { texto: aFormatoCorto(r.venc) || "—", x: 292, ancho: 72 },
-              { texto: textoDias(r.dias), x: 370, ancho: 145, color: COLOR.gris },
-            ],
+    const areas = porArea(lista);
+    const suma = (filasArea, campo) => filasArea.reduce((n, f) => n + f[campo].length, 0);
+    const bloques = areas.flatMap(({ rotulo, filas: filasArea }) =>
+      filasArea.map((fila, i) => {
+        const bloque = bloquePersona(fila, i + 1);
+        // la banda va dentro del primer bloque: asi no se queda sola al pie de la hoja
+        if (i === 0) {
+          bloque.unshift({
+            tipo: "area",
+            texto: rotulo,
+            derecha: `${filasArea.length} persona(s) · ${suma(filasArea, "vencidos")} vencido(s) · ${suma(filasArea, "porVencer")} por vencer`,
           });
-        });
-      }
-      if (!vencidos.length) partes.push({ tipo: "nota", texto: "sin RRCC vencidos" });
-      partes.push({ tipo: "espacio", alto: 6 });
-      return partes;
-    });
+        }
+        return bloque;
+      })
+    );
 
-    const nombre = `ESTADO TOTAL ${hoyIso()}.pdf`;
     el.pdf.disabled = true;
     try {
-      descargarBlob(
-        await armarPdf({
-          titulo: TITULO_INFORME,
-          subtitulo: subtituloInforme(lista),
-          bloques,
-        }),
-        nombre
-      );
-      consola(`${lista.length} persona(s) exportadas a ${nombre}`, "ok");
+      const blob = await armarPdf({
+        titulo: TITULO_INFORME,
+        subtitulo: subtituloInforme(lista),
+        bloques,
+      });
+      abrirVisorPdf({
+        titulo: "Vista previa del informe",
+        subtitulo: `${lista.length} persona(s) en ${areas.length} área(s)`,
+        pdf: await blob.arrayBuffer(),
+        nombre: `ESTADO TOTAL ${hoyIso()}.pdf`,
+      });
+      consola(`vista previa del PDF: ${lista.length} persona(s) en ${areas.length} área(s)`, "ok");
     } catch (e) {
-      consola(`no se pudo exportar el PDF: ${e.message}`, "err");
-      notificar("No se pudo exportar", e.message, "warn");
+      consola(`no se pudo armar el PDF: ${e.message}`, "err");
+      notificar("No se pudo armar el PDF", e.message, "warn");
     } finally {
       el.pdf.disabled = filas.length === 0;
     }
@@ -868,17 +809,7 @@ export function montarEstadoTotal() {
 
   el.cargar.addEventListener("click", () => cargar());
   el.recargar.addEventListener("click", () => cargar({ refrescar: true }));
-  // el PDF pasa siempre por la vista previa: primero se ve, luego se baja
-  el.pdf.addEventListener("click", abrirPrevia);
-  el.previaCerrar.addEventListener("click", cerrarPrevia);
-  el.previaModal.addEventListener("click", (ev) => {
-    if (ev.target === el.previaModal) cerrarPrevia(); // clic fuera de la caja
-  });
-  el.previaImprimir.addEventListener("click", () => window.print());
-  el.previaDescargar.addEventListener("click", async () => {
-    await exportarPdf();
-    cerrarPrevia();
-  });
+  el.pdf.addEventListener("click", verPdf);
   el.excel.addEventListener("click", exportarExcel);
   el.imagen.addEventListener("click", exportarImagen);
   el.pdfVista.addEventListener("click", exportarPdfVista);

@@ -1369,10 +1369,6 @@ input[type="date"].inp { color-scheme: dark; }
 .modal-body { padding: 13px; overflow: auto; min-height: 0; }
 .modal-body canvas { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 2px; }
 
-/* la vista previa del informe usa toda la caja disponible */
-.modal-informe { width: min(900px, 96vw); height: 92dvh; }
-.modal-informe .modal-body { flex: 1 1 auto; }
-
 .modal-foot {
   display: flex;
   gap: 9px;
@@ -2051,72 +2047,6 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
 .et-tipos .btn[aria-pressed="true"] { border-color: var(--cy); color: var(--cy); background: rgba(34, 211, 238, 0.1); }
 
 /* ==========================================================================
-   ESTADO TOTAL - informe por persona (vista previa de lo que se imprime)
-   ==========================================================================
-   Es la misma pieza en pantalla y en papel: lo que se ve aqui es lo que sale
-   por la impresora y lo que se vuelca al PDF, para no tener que imprimir
-   para saber que va a salir. */
-
-.et-informe { display: flex; flex-direction: column; gap: 9px; }
-
-.et-inf-persona {
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: var(--panel-2);
-  overflow: hidden;
-  break-inside: avoid-page;
-  page-break-inside: avoid;
-}
-
-.et-inf-persona > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 11px;
-  border-left: 3px solid var(--rd);
-  border-bottom: 1px solid var(--line);
-  background: rgba(34, 211, 238, 0.05);
-}
-/* el nombre es lo que se busca al pasar las hojas: va mas grande que todo lo demas */
-.et-inf-persona > header b {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1.15;
-  color: var(--tx);
-}
-.et-inf-n { color: var(--tx-mute); margin-right: 8px; }
-.et-inf-persona > header span { flex: 0 0 auto; font-size: 10.5px; color: var(--tx-dim); white-space: nowrap; }
-
-.et-inf-sub { padding: 6px 11px 2px; font-size: 10.5px; color: var(--tx-dim); }
-
-.et-inf-grupo { padding: 6px 11px 4px; }
-.et-inf-grupo > b { display: inline-flex; align-items: center; gap: 7px; font-size: 9.5px; letter-spacing: 0.12em; }
-.et-inf-grupo > b::before { content: ""; width: 7px; height: 7px; background: currentColor; border-radius: 1px; }
-.et-inf-a > b { color: var(--rd); }
-.et-inf-c > b { color: var(--am); }
-.et-inf-x > b { color: var(--tx-mute); }
-
-.et-inf-grupo table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 11px; }
-.et-inf-grupo td { padding: 3px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
-.et-inf-grupo tr:last-child td { border-bottom: 0; }
-.et-inf-cod { width: 46px; font-weight: 700; color: var(--cy); }
-.et-inf-fecha { width: 92px; white-space: nowrap; }
-.et-inf-dias { width: 156px; color: var(--tx-dim); white-space: nowrap; }
-.et-inf-vacio { padding: 2px 11px 8px; font-size: 10.5px; color: var(--tx-mute); }
-
-/* Encabezado del informe: solo sale en papel (en pantalla ya esta el titulo
-   del flotante), y dice lo mismo que la cabecera del PDF. */
-.et-inf-cabecera { display: none; }
-
-@media (max-width: 900px) {
-  .et-inf-persona > header { flex-wrap: wrap; gap: 4px; }
-  .et-inf-persona > header b { font-size: 14px; }
-  .et-inf-dias, .et-inf-fecha { width: auto; }
-}
-
-/* ==========================================================================
    EXPORTACION - autorizados "A" en vigor, con su ZIP de certificados
    ========================================================================== */
 
@@ -2387,56 +2317,6 @@ tr.et-noaplica   { border-left: 3px solid var(--line); opacity: 0.6; }
   /* el desplegable A/C es para trabajar en pantalla: lo impreso sigue como antes */
   #vista-estado .estado-tabla .es-tipo,
   #vista-estado .estado-tabla col.ec-tipo { display: none; }
-
-  /* ESTADO TOTAL: lo que se imprime es la vista previa del informe (el
-     flotante), no la vista de detras. Asi lo impreso es exactamente lo que
-     se acaba de ver, y coincide con el PDF que genera el mismo boton. */
-  body:has(#et-previa-modal:not([hidden])) { height: auto; overflow: visible; background: #fff; color: #0a0a0a; }
-  body:has(#et-previa-modal:not([hidden])) .wrap { display: none !important; }
-
-  #et-previa-modal:not([hidden]) {
-    position: static;
-    display: block;
-    padding: 0;
-    background: none;
-    backdrop-filter: none;
-  }
-  #et-previa-modal .modal-caja {
-    display: block;
-    max-width: none;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    background: none;
-    overflow: visible;
-  }
-  #et-previa-modal .modal-head,
-  #et-previa-modal .modal-foot { display: none !important; }
-  #et-previa-modal .modal-body { padding: 0; overflow: visible; }
-  /* en pantalla la caja esta acotada; en papel manda el ancho de la hoja */
-  #et-previa-modal .modal-informe { width: auto; height: auto; }
-
-  .et-inf-cabecera {
-    display: block;
-    margin-bottom: 12px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid #a3122a;
-  }
-  .et-inf-cabecera b { display: block; font-size: 17pt; font-weight: 900; letter-spacing: 0.01em; color: #0a0a0a; }
-  .et-inf-cabecera span { display: block; margin-top: 3px; font-size: 9pt; color: #555; }
-
-  .et-inf-persona { border-color: #bbb; background: none; }
-  .et-inf-persona > header { background: #f1f1f3; border-left-color: #a3122a; border-bottom-color: #bbb; }
-  .et-inf-persona > header b { color: #0a0a0a; }
-  .et-inf-persona > header span,
-  .et-inf-sub { color: #444; }
-  .et-inf-n { color: #777; }
-  .et-inf-a > b { color: #a3122a; }
-  .et-inf-c > b { color: #8a5a00; }
-  .et-inf-x > b { color: #666; }
-  .et-inf-cod { color: #0a0a0a; }
-  .et-inf-grupo td { border-bottom-color: #ddd; color: #0a0a0a; }
-  .et-inf-dias { color: #444; }
 
   /* en pantalla van en tres columnas; impreso, una sola columna es mas legible */
   #vista-estado .estado-rrcc { display: block; }

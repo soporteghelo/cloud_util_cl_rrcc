@@ -1212,3 +1212,25 @@ export function leerFila(fila) {
     })),
   };
 }
+
+/**
+ * Las filas de un informe ({ persona, vencidos, porVencer }) repartidas por
+ * area, de la A a la Z y con lo que no es un area al final: S/A, las celdas
+ * con error ("#N/A") y las vacias, con nombre propio para que se note el dato
+ * que falta. Dentro de cada area se respeta el orden en que vienen.
+ */
+export function porArea(filas) {
+  const clave = (f) => String(f.persona?.area ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  const peso = (a) => (!a ? 3 : a.startsWith("#") ? 2 : a === "S/A" ? 1 : 0);
+  const rotulo = (a) =>
+    !a ? "ÁREA NO REGISTRADA EN LA HOJA" : a.startsWith("#") ? `ÁREA CON ERROR EN LA HOJA (${a})` : a === "S/A" ? "SIN ÁREA (S/A)" : a;
+  const grupos = new Map();
+  for (const f of filas) {
+    const a = clave(f);
+    if (!grupos.has(a)) grupos.set(a, []);
+    grupos.get(a).push(f);
+  }
+  return [...grupos]
+    .sort(([a], [b]) => peso(a) - peso(b) || a.localeCompare(b, "es"))
+    .map(([a, lista]) => ({ area: a, rotulo: rotulo(a), filas: lista }));
+}

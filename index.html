@@ -676,7 +676,7 @@
                   class="btn btn-ghost"
                   id="et-pdf"
                   type="button"
-                  title="Ver el informe detallado y descargarlo en PDF"
+                  title="Ver el PDF del informe detallado, separado por áreas. Se descarga desde la vista previa"
                   disabled
                 >
                   PDF
@@ -954,7 +954,7 @@
                   <b>ESTADO TOTAL</b>
                   <span>
                     Personal activo con algún RRCC vencido. Clic en una fila para ver el detalle. Se exporta en PDF
-                    (el detalle por persona, o la tabla por guardia con <kbd>⤓ exportar pdf</kbd>), Excel o imagen.
+                    (el detalle por persona, separado por áreas y con vista previa, o la tabla por guardia con <kbd>⤓ exportar pdf</kbd>), Excel o imagen.
                   </span>
                 </li>
                 <li>
@@ -1260,22 +1260,6 @@ Instrucciones:
         <div class="modal-foot">
           <button class="btn btn-ghost btn-sm" id="nv-carpeta-cancelar" type="button">CERRAR</button>
           <button class="btn btn-go btn-sm" id="nv-carpeta-subir" type="button" disabled>SUBIR A LA BASE</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- vista previa del informe de ESTADO TOTAL (lo mismo que sale en el PDF) -->
-    <div class="modal" id="et-previa-modal" hidden>
-      <div class="modal-caja modal-informe">
-        <div class="modal-head">
-          <b>Vista previa del informe</b>
-          <span class="count" id="et-previa-count"></span>
-          <button class="modal-x" id="et-previa-cerrar" type="button" aria-label="Cerrar">×</button>
-        </div>
-        <div class="modal-body et-informe" id="et-previa-cuerpo"></div>
-        <div class="modal-foot">
-          <button class="btn btn-ghost btn-sm" id="et-previa-imprimir" type="button">IMPRIMIR</button>
-          <button class="btn btn-go btn-sm" id="et-previa-descargar" type="button">DESCARGAR PDF</button>
         </div>
       </div>
     </div>
